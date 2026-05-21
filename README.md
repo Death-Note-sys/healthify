@@ -25,8 +25,8 @@ healthify/
 | Charts     | Recharts                      |
 | Fonts      | Syne + Plus Jakarta Sans      |
 | Styling    | Inline styles + CSS-in-JS     |
-| AI Coach   | Anthropic Claude API          |
-| Hosting    | Vercel / Netlify (free tier)  |
+| AI Coach   | Google Gemini API             |
+| Hosting    | Vercel                        |
 
 ---
 
@@ -38,5 +38,5 @@ healthify/
 | 2    | Dashboard            | ✅ Done |
 | 3    | Food Log             | ✅ Done |
 | 4    | Analytics            | ✅ Done |
-| 5    | Profile Page         | ✅ Done|
-| 6    | AI Chatbot           | ✅ Done|
+| 5    | Profile Page         | ✅ Done |
+| 6    | AI Chatbot           | ✅ Done |
