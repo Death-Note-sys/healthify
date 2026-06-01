@@ -607,7 +607,7 @@ const Dashboard = ({ user, logs, setLogs, water, setWater, setPage }) => {
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>{Math.round(l.food.cal * l.qty)} kcal</div>
                     <div style={{ fontSize: 11, color: C.blue }}>{Math.round(l.food.protein * l.qty)}g protein</div>
                   </div>
-                  <button onClick={() => delLog(l.id)}
+                  <button aria-label="Delete log" onClick={() => delLog(l.id)}
                     style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 6, color: '#f87171', padding: '3px 8px', cursor: 'pointer', fontSize: 14, fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
                     ×
                   </button>
@@ -740,7 +740,7 @@ const FoodLog = ({ user, logs, setLogs }) => {
             }}
           />
           {sq && (
-            <button onClick={() => setSq('')}
+            <button aria-label="Clear search" onClick={() => setSq('')}
               style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: C.dim, cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>
               ×
             </button>
@@ -892,7 +892,7 @@ const FoodLog = ({ user, logs, setLogs }) => {
                       <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>{Math.round(l.food.cal * l.qty)}</div>
                       <div style={{ fontSize: 10, color: C.dim }}>kcal</div>
                     </div>
-                    <button onClick={() => delLog(l.id)} style={{
+                    <button aria-label="Delete log" onClick={() => delLog(l.id)} style={{
                       background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)',
                       borderRadius: 6, color: '#f87171', padding: '3px 9px',
                       cursor: 'pointer', fontSize: 15, lineHeight: 1,
