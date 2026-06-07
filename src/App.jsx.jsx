@@ -1337,18 +1337,6 @@ Give personalized, actionable advice. Keep responses concise (under 120 words) u
     setTimeout(scroll, 80);
 
     try {
-      const apiKey = typeof import.meta !== 'undefined'
-        ? import.meta.env?.VITE_GEMINI_API_KEY
-        : undefined;
-
-      if (!apiKey) {
-        setMsgs(p => [...p, {
-          role: 'assistant',
-          content: "⚠️ No API key found. Create a .env.local file in your project root with:\nVITE_GEMINI_API_KEY=your-key-here\n\nGet a free key at aistudio.google.com"
-        }]);
-        setLoading(false);
-        return;
-      }
 
       // Gemini requires conversation to START with a user message
       // so we skip the initial assistant greeting (index 0)
@@ -1360,7 +1348,7 @@ Give personalized, actionable advice. Keep responses concise (under 120 words) u
         }));
 
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        '/api/chat',
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1384,7 +1372,7 @@ Give personalized, actionable advice. Keep responses concise (under 120 words) u
     } catch (err) {
       setMsgs(p => [...p, {
         role: 'assistant',
-        content: `❌ Error: ${err.message}\n\nMake sure:\n1. .env.local has VITE_GEMINI_API_KEY=your-key\n2. You restarted npm run dev after adding the key\n3. Your Gemini key is active at aistudio.google.com`
+        content: `❌ Error: ${err.message}\n\nMake sure your backend is running and the API key is set.`
       }]);
     } finally {
       setLoading(false);
