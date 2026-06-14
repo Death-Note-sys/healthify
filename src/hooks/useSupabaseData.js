@@ -12,9 +12,11 @@ export function useSupabaseData(authUser, FOOD_DB) {
   const [logs, setLogs]       = useState([]);
   const [water, setWater]     = useState(0);
   const [loading, setLoading] = useState(true);
+  const [activeUserId, setActiveUserId] = useState(null);
 
   // ── Load everything when auth user changes ────────────────
   useEffect(() => {
+    setActiveUserId(authUser?.id || null);
     if (authUser) {
       loadAll();
     } else {
@@ -29,6 +31,7 @@ export function useSupabaseData(authUser, FOOD_DB) {
     setLoading(true);
     await Promise.all([loadProfile(), loadLogs(), loadWater()]);
     setLoading(false);
+    setChecked(true);
   };
 
   // ── Profile ───────────────────────────────────────────────
@@ -212,7 +215,7 @@ export function useSupabaseData(authUser, FOOD_DB) {
     profile,
     logs,
     water,
-    loading,
+    loading: loading || ((authUser?.id || null) !== activeUserId),
     saveProfile,
     addFoodLog,
     addCustomFoodLog,
