@@ -904,7 +904,7 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
     }
     setAiLoading(true);
     try {
-      const res = await fetch('http://localhost:3001/api/nutrition/analyze', {
+      const res = await fetch('/api/nutrition/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ foodText: sq })
