@@ -16,6 +16,11 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '50kb' }));
 
+// ── Health Check ──
+app.get('/api/ping', (req, res) => {
+  res.json({ status: 'ok', key_exists: !!process.env.GROQ_API_KEY });
+});
+
 // ── Rate limiter: 20 requests per minute per IP ──
 const chatLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -107,6 +112,10 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`✅ Healthify API server running → http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`✅ Healthify API server running → http://localhost:${PORT}`);
+  });
+}
+
+export default app;
