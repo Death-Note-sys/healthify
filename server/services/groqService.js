@@ -10,7 +10,7 @@
  */
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'openai/gpt-oss-120b';
 const MAX_RETRIES = 2;
 const TIMEOUT_MS = 30000;
 
