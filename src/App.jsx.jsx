@@ -1373,15 +1373,49 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
     setSq('');
   };
 
+  // Persisted list of food names the user dismissed from Quick Re-Log
+  const relogStorageKey = `healthify_dismissed_relog_${user?.id || (demoMode ? 'demo' : 'default')}`;
+  const [hiddenReLogFoods, setHiddenReLogFoods] = useState(() => {
+    try {
+      const saved = localStorage.getItem(relogStorageKey);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const handleDismissReLog = (foodName, e) => {
+    e?.stopPropagation?.();
+    const key = foodName.toLowerCase().trim();
+    setHiddenReLogFoods(prev => {
+      const next = [...new Set([...prev, key])];
+      try {
+        localStorage.setItem(relogStorageKey, JSON.stringify(next));
+      } catch (err) {}
+      return next;
+    });
+    showToast(`Removed "${foodName}" from Quick Re-Log`);
+  };
+
+  const handleResetHiddenReLog = () => {
+    setHiddenReLogFoods([]);
+    try {
+      localStorage.removeItem(relogStorageKey);
+    } catch (e) {}
+    showToast('Restored all hidden quick re-log items');
+  };
+
   // Extract unique past logged foods for Quick Re-Log (0 AI tokens, instant)
   const recentFoods = (() => {
     const list = [];
     const seen = new Set();
+    const hiddenSet = new Set(hiddenReLogFoods.map(k => k.toLowerCase().trim()));
     const reversed = [...logs].reverse();
 
     for (const l of reversed) {
       if (!l.food || !l.food.name) continue;
       const key = l.food.name.toLowerCase().trim();
+      if (hiddenSet.has(key)) continue; // Dismissed by user
       if (!seen.has(key)) {
         seen.add(key);
         list.push({
@@ -1394,10 +1428,11 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
       if (list.length >= 8) break;
     }
 
-    // Fallback popular staple foods if user has few logs
+    // Fallback popular staple foods if user has few logs (and not dismissed)
     if (list.length < 4) {
       for (const f of FOOD_DB) {
         const key = f.name.toLowerCase().trim();
+        if (hiddenSet.has(key)) continue;
         if (!seen.has(key)) {
           seen.add(key);
           list.push({
@@ -1596,9 +1631,20 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
         {sq.length <= 1 && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--glass-border)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <History size={15} color="var(--ink-primary)" />
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-primary)' }}>Quick Re-Log Previous Foods</span>
+                {hiddenReLogFoods.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetHiddenReLog}
+                    style={{
+                      background: 'none', border: 'none', color: 'var(--ink-muted)',
+                      fontSize: 11, cursor: 'pointer', padding: '0 4px', textDecoration: 'underline'
+                    }}>
+                    Reset ({hiddenReLogFoods.length} hidden)
+                  </button>
+                )}
               </div>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-green)', background: 'rgba(16, 185, 129, 0.08)', padding: '2px 8px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <Zap size={11} /> 0 Tokens · 1-Tap
@@ -1606,58 +1652,103 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {recentFoods.map((item, idx) => {
-                const totalItemCal = Math.round((item.food.cal || 0) * (item.qty || 1));
-                const totalItemProt = Math.round((item.food.protein || 0) * (item.qty || 1));
-                const totalItemCarb = Math.round((item.food.carbs || 0) * (item.qty || 1));
-                const totalItemFat = Math.round((item.food.fat || 0) * (item.qty || 1));
-                return (
-                  <motion.div
-                    key={idx}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.03 }}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 12,
-                      border: '1px solid var(--glass-border)', transition: 'all 0.2s'
-                    }}>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: 18, background: 'var(--bg-surface)', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, flexShrink: 0, boxShadow: 'var(--shadow-sm)' }}>
-                        {item.food.e || '✨'}
-                      </span>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.food.name}</span>
-                          {item.isCustom && (
-                            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--ink-secondary)', background: 'var(--bg-surface)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
-                              AI Saved
-                            </span>
-                          )}
-                        </div>
-                        <div className="mono-num" style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2 }}>
-                          <strong style={{ color: 'var(--ink-primary)' }}>{totalItemCal} kcal</strong> ·{' '}
-                          <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{totalItemProt}g P</span> ·{' '}
-                          <span style={{ color: 'var(--accent-green)' }}>{totalItemCarb}g C</span> ·{' '}
-                          <span style={{ color: 'var(--accent-amber)' }}>{totalItemFat}g F</span>
+              <AnimatePresence mode="popLayout">
+                {recentFoods.map((item) => {
+                  const totalItemCal = Math.round((item.food.cal || 0) * (item.qty || 1));
+                  const totalItemProt = Math.round((item.food.protein || 0) * (item.qty || 1));
+                  const totalItemCarb = Math.round((item.food.carbs || 0) * (item.qty || 1));
+                  const totalItemFat = Math.round((item.food.fat || 0) * (item.qty || 1));
+                  return (
+                    <motion.div
+                      layout
+                      key={item.food.name}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, height: 0, marginBottom: 0, padding: 0 }}
+                      transition={{ duration: 0.2 }}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 12,
+                        border: '1px solid var(--glass-border)', transition: 'background 0.2s',
+                        overflow: 'hidden'
+                      }}>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: 18, background: 'var(--bg-surface)', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, flexShrink: 0, boxShadow: 'var(--shadow-sm)' }}>
+                          {item.food.e || '✨'}
+                        </span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.food.name}</span>
+                            {item.isCustom && (
+                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--ink-secondary)', background: 'var(--bg-surface)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
+                                AI Saved
+                              </span>
+                            )}
+                          </div>
+                          <div className="mono-num" style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2 }}>
+                            <strong style={{ color: 'var(--ink-primary)' }}>{totalItemCal} kcal</strong> ·{' '}
+                            <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{totalItemProt}g P</span> ·{' '}
+                            <span style={{ color: 'var(--accent-green)' }}>{totalItemCarb}g C</span> ·{' '}
+                            <span style={{ color: 'var(--accent-amber)' }}>{totalItemFat}g F</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 10 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleReLog(item)}
+                          className="btn-secondary"
+                          style={{
+                            padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            textTransform: 'capitalize'
+                          }}>
+                          <Repeat size={13} /> + {meal}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDismissReLog(item.food.name, e)}
+                          title="Remove from quick re-log"
+                          style={{
+                            width: 28, height: 28, borderRadius: 8,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'transparent', border: '1px solid transparent',
+                            color: 'var(--ink-muted)', cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = 'var(--accent-red)';
+                            e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+                            e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = 'var(--ink-muted)';
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.borderColor = 'transparent';
+                          }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              {recentFoods.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--ink-muted)', fontSize: 12 }}>
+                  All quick items cleared.
+                  {hiddenReLogFoods.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => handleReLog(item)}
-                      className="btn-secondary"
-                      style={{
-                        padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8,
-                        flexShrink: 0, marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 4,
-                        textTransform: 'capitalize'
-                      }}>
-                      <Repeat size={13} /> + {meal}
+                      onClick={handleResetHiddenReLog}
+                      style={{ background: 'none', border: 'none', color: 'var(--ink-primary)', fontWeight: 600, marginLeft: 6, cursor: 'pointer', textDecoration: 'underline' }}>
+                      Restore hidden items
                     </button>
-                  </motion.div>
-                );
-              })}
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
