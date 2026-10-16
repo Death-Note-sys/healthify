@@ -8,10 +8,11 @@ import { supabase } from '../lib/supabase';
  * @param {Array}       FOOD_DB  – Client-side food database array
  */
 export function useSupabaseData(authUser, FOOD_DB) {
-  const [profile, setProfile] = useState(null);
-  const [logs, setLogs]       = useState([]);
-  const [water, setWater]     = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile]       = useState(null);
+  const [logs, setLogs]             = useState([]);
+  const [water, setWater]           = useState(0);
+  const [weightLogs, setWeightLogs] = useState([]);
+  const [loading, setLoading]       = useState(true);
   const [activeUserId, setActiveUserId] = useState(null);
 
   // ── Load everything when auth user changes ────────────────
@@ -23,15 +24,15 @@ export function useSupabaseData(authUser, FOOD_DB) {
       setProfile(null);
       setLogs([]);
       setWater(0);
+      setWeightLogs([]);
       setLoading(false);
     }
   }, [authUser?.id]);
 
   const loadAll = async () => {
     setLoading(true);
-    await Promise.all([loadProfile(), loadLogs(), loadWater()]);
+    await Promise.all([loadProfile(), loadLogs(), loadWater(), loadWeightLogs()]);
     setLoading(false);
-    setChecked(true);
   };
 
   // ── Profile ───────────────────────────────────────────────
@@ -211,16 +212,128 @@ export function useSupabaseData(authUser, FOOD_DB) {
     );
   };
 
+  // ── Weight logs ───────────────────────────────────────────
+  const loadWeightLogs = async () => {
+    try {
+      const localKey = `healthify_weight_logs_${authUser.id}`;
+      const cached = localStorage.getItem(localKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) setWeightLogs(parsed);
+        } catch (e) {}
+      }
+
+      const { data, error } = await supabase
+        .from('weight_logs')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('logged_at', { ascending: true });
+
+      if (!error && data) {
+        setWeightLogs(data);
+        localStorage.setItem(localKey, JSON.stringify(data));
+      } else if (error && error.code !== 'PGRST205' && error.code !== '42P01') {
+        console.warn('loadWeightLogs error:', error.message);
+      }
+    } catch (err) {
+      console.warn('loadWeightLogs error:', err);
+    }
+  };
+
+  const saveWeightLog = async (weightVal, dateStr = null) => {
+    const today = new Date().toISOString().split('T')[0];
+    const logDate = dateStr || today;
+    const numWeight = parseFloat(Number(weightVal).toFixed(1));
+
+    if (isNaN(numWeight) || numWeight <= 0) return { error: { message: 'Invalid weight value' } };
+
+    // Optimistic UI update
+    setWeightLogs((prev) => {
+      const existingIdx = prev.findIndex((l) => l.logged_at === logDate);
+      let updated;
+      if (existingIdx >= 0) {
+        updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], weight: numWeight };
+      } else {
+        updated = [...prev, { id: 'temp_' + Date.now(), user_id: authUser.id, weight: numWeight, logged_at: logDate }];
+        updated.sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
+      }
+      try {
+        localStorage.setItem(`healthify_weight_logs_${authUser.id}`, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    // Also update profile weight if logged for today
+    if (logDate === today) {
+      saveProfile({ weight: numWeight });
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('weight_logs')
+        .upsert(
+          {
+            user_id:   authUser.id,
+            weight:    numWeight,
+            logged_at: logDate,
+          },
+          { onConflict: 'user_id,logged_at' }
+        )
+        .select()
+        .single();
+
+      if (!error && data) {
+        setWeightLogs((prev) => {
+          const next = prev.map((l) => (l.logged_at === logDate ? data : l));
+          try {
+            localStorage.setItem(`healthify_weight_logs_${authUser.id}`, JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        });
+        return { data, error: null };
+      }
+      return { data: null, error };
+    } catch (err) {
+      console.warn('saveWeightLog error:', err);
+      return { data: null, error: err };
+    }
+  };
+
+  const deleteWeightLog = async (logIdOrDate) => {
+    setWeightLogs((prev) => {
+      const filtered = prev.filter((l) => l.id !== logIdOrDate && l.logged_at !== logIdOrDate);
+      try {
+        localStorage.setItem(`healthify_weight_logs_${authUser.id}`, JSON.stringify(filtered));
+      } catch (e) {}
+      return filtered;
+    });
+
+    try {
+      await supabase
+        .from('weight_logs')
+        .delete()
+        .eq('user_id', authUser.id)
+        .or(`id.eq.${logIdOrDate},logged_at.eq.${logIdOrDate}`);
+    } catch (err) {
+      console.warn('deleteWeightLog error:', err);
+    }
+  };
+
   return {
     profile,
     logs,
     water,
+    weightLogs,
     loading: loading || ((authUser?.id || null) !== activeUserId),
     saveProfile,
     addFoodLog,
     addCustomFoodLog,
     deleteFoodLog,
     saveWater,
+    saveWeightLog,
+    deleteWeightLog,
     refreshAll: loadAll,
   };
 }

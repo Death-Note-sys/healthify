@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2 } from "lucide-react";
+import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar } from "lucide-react";
 
 import { useAuth } from './hooks/useAuth';
 import { useSupabaseData } from './hooks/useSupabaseData';
@@ -220,6 +220,181 @@ const mkTodayLogs = () => [
   {id:4, food:FOOD_DB[0],  qty:1.5, mealType:'lunch',     date:new Date().toISOString()},
   {id:5, food:FOOD_DB[1],  qty:1,   mealType:'lunch',     date:new Date().toISOString()},
 ];
+
+// ── Weight timeline data generator & processors ───────────────
+const mkDemoWeightLogs = (currentWeight = 75, goal = 'bulk') => {
+  const logs = [];
+  const now = new Date();
+  const weeklyDelta = goal === 'cut' ? -0.35 : goal === 'bulk' ? 0.15 : 0;
+
+  for (let i = 365; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const isRecent = i <= 30;
+    const isWeeklySample = i % 4 === 0 || i % 7 === 0;
+
+    if (isRecent || isWeeklySample || i === 0) {
+      const weeksAgo = i / 7;
+      const baseTrend = currentWeight - (weeksAgo * weeklyDelta);
+      const noise = (Math.sin(i * 0.7) * 0.35) + (Math.cos(i * 1.3) * 0.2);
+      const calculatedWeight = i === 0 ? currentWeight : parseFloat((baseTrend + noise).toFixed(1));
+      logs.push({
+        id: `demo_w_${i}`,
+        weight: calculatedWeight,
+        logged_at: dateStr,
+      });
+    }
+  }
+  return logs;
+};
+
+const processWeightTimeline = (logs = [], timeline = 'weekly', fallbackWeight = 70) => {
+  const sorted = [...logs].sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
+  const latestWeight = sorted.length > 0 ? sorted[sorted.length - 1].weight : fallbackWeight;
+  const now = new Date();
+
+  if (timeline === 'weekly') {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const points = [];
+    let prevKnown = sorted.length > 0 ? sorted[0].weight : latestWeight;
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const match = sorted.find(l => l.logged_at === dateStr);
+      if (match) {
+        prevKnown = match.weight;
+      }
+      points.push({
+        date: dateStr,
+        label: i === 0 ? 'Today' : days[d.getDay()],
+        shortDate: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        fullDate: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        weight: match ? match.weight : prevKnown,
+        isLogged: !!match,
+      });
+    }
+
+    const first = points[0].weight;
+    const last = points[points.length - 1].weight;
+    const diff = parseFloat((last - first).toFixed(1));
+    const weights = points.map(p => p.weight);
+    const min = Math.min(...weights);
+    const max = Math.max(...weights);
+    const avg = parseFloat((weights.reduce((a, b) => a + b, 0) / weights.length).toFixed(1));
+
+    return {
+      points,
+      current: last,
+      diff,
+      min,
+      max,
+      avg,
+      rangeLabel: `${points[0].shortDate} – ${points[points.length - 1].shortDate}`,
+    };
+  }
+
+  if (timeline === 'monthly') {
+    const points = [];
+    let prevKnown = sorted.length > 0 ? sorted[0].weight : latestWeight;
+
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const match = sorted.find(l => l.logged_at === dateStr);
+      if (match) {
+        prevKnown = match.weight;
+      }
+      const showLabel = i % 6 === 0 || i === 0;
+      points.push({
+        date: dateStr,
+        label: showLabel ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
+        shortDate: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        fullDate: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        weight: match ? match.weight : prevKnown,
+        isLogged: !!match,
+      });
+    }
+
+    const first = points[0].weight;
+    const last = points[points.length - 1].weight;
+    const diff = parseFloat((last - first).toFixed(1));
+    const weights = points.map(p => p.weight);
+    const min = Math.min(...weights);
+    const max = Math.max(...weights);
+    const avg = parseFloat((weights.reduce((a, b) => a + b, 0) / weights.length).toFixed(1));
+
+    return {
+      points,
+      current: last,
+      diff,
+      min,
+      max,
+      avg,
+      rangeLabel: `Last 30 days (${points[0].shortDate} – ${points[points.length - 1].shortDate})`,
+    };
+  }
+
+  if (timeline === 'yearly') {
+    const points = [];
+    let prevKnown = sorted.length > 0 ? sorted[0].weight : latestWeight;
+
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const monthLabel = d.toLocaleDateString('en-US', { month: 'short' });
+      const fullLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      const monthLogs = sorted.filter(l => {
+        const ld = new Date(l.logged_at);
+        return ld.getFullYear() === year && ld.getMonth() === month;
+      });
+
+      let avgWeight;
+      let isLogged = false;
+      if (monthLogs.length > 0) {
+        avgWeight = parseFloat((monthLogs.reduce((acc, curr) => acc + curr.weight, 0) / monthLogs.length).toFixed(1));
+        prevKnown = avgWeight;
+        isLogged = true;
+      } else {
+        avgWeight = prevKnown;
+      }
+
+      points.push({
+        date: `${year}-${String(month + 1).padStart(2, '0')}`,
+        label: monthLabel,
+        shortDate: monthLabel,
+        fullDate: fullLabel,
+        weight: avgWeight,
+        isLogged,
+      });
+    }
+
+    const first = points[0].weight;
+    const last = points[points.length - 1].weight;
+    const diff = parseFloat((last - first).toFixed(1));
+    const weights = points.map(p => p.weight);
+    const min = Math.min(...weights);
+    const max = Math.max(...weights);
+    const avg = parseFloat((weights.reduce((a, b) => a + b, 0) / weights.length).toFixed(1));
+
+    return {
+      points,
+      current: last,
+      diff,
+      min,
+      max,
+      avg,
+      rangeLabel: `Past 12 months (${points[0].fullDate} – ${points[points.length - 1].fullDate})`,
+    };
+  }
+
+  return { points: [], current: latestWeight, diff: 0, min: latestWeight, max: latestWeight, avg: latestWeight, rangeLabel: '' };
+};
 
 // ── Shared UI primitives ─────────────────────────────────────
 const Btn = ({ children, onClick, style: s = {}, disabled }) => (
@@ -658,17 +833,311 @@ const Onboard = ({ onFinish, initialData, onCancel }) => {
   );
 };
 
+// ── Daily Body Weight Log (Home Section) ──────────────────────
+const DailyBodyWeightCard = ({ user, weightLogs = [], saveWeight, setPage }) => {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayLog = weightLogs.find(l => l.logged_at === todayStr);
+  const sortedLogs = [...weightLogs].sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
+  const latestLog = sortedLogs.length > 0 ? sortedLogs[sortedLogs.length - 1] : null;
+  const currentWeight = todayLog ? todayLog.weight : (latestLog ? latestLog.weight : (user?.weight || 70));
+
+  const [inputWeight, setInputWeight] = useState(currentWeight);
+  const [savedToast, setSavedToast] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Sync input when currentWeight changes or user updates
+  useEffect(() => {
+    setInputWeight(currentWeight);
+  }, [currentWeight]);
+
+  // Calculate change from previous log
+  const prevLog = sortedLogs.length > 1 ? sortedLogs[sortedLogs.length - 2] : null;
+  const diffFromPrev = prevLog ? parseFloat((currentWeight - prevLog.weight).toFixed(1)) : null;
+
+  const handleAdjust = (delta) => {
+    setInputWeight(prev => {
+      const next = parseFloat((Number(prev || currentWeight) + delta).toFixed(1));
+      return Math.max(20, Math.min(300, next));
+    });
+  };
+
+  const handleSave = async () => {
+    const val = parseFloat(Number(inputWeight).toFixed(1));
+    if (isNaN(val) || val < 20 || val > 300) return;
+    setIsSubmitting(true);
+    await saveWeight(val, todayStr);
+    setIsSubmitting(false);
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 2200);
+  };
+
+  // 7-day strip data
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    const dStr = d.toISOString().split('T')[0];
+    const match = sortedLogs.find(l => l.logged_at === dStr);
+    return {
+      day: i === 6 ? 'Today' : days[d.getDay()],
+      dateStr: dStr,
+      weight: match ? match.weight : null,
+      isToday: i === 6,
+    };
+  });
+
+  return (
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 12 },
+        show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } }
+      }}
+      className="glass-card"
+      style={{ padding: 20, marginBottom: 16 }}>
+      {/* ── Section Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ background: 'var(--bg-elevated)', padding: 7, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Scale size={18} color="var(--ink-primary)" />
+          </div>
+          <div>
+            <div className="title" style={{ fontSize: 16 }}>Daily Body Weight</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 1 }}>Track daily changes & trend</div>
+          </div>
+        </div>
+
+        {todayLog ? (
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.22)',
+              color: 'var(--accent-green)',
+              padding: '4px 10px',
+              borderRadius: 99,
+              fontSize: 11,
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5
+            }}>
+            <Check size={12} strokeWidth={2.5} /> Logged Today
+          </motion.div>
+        ) : (
+          <div style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--glass-border)',
+            color: 'var(--ink-muted)',
+            padding: '4px 10px',
+            borderRadius: 99,
+            fontSize: 11,
+            fontWeight: 500
+          }}>
+            Pending today
+          </div>
+        )}
+      </div>
+
+      {/* ── Current Display + Delta ── */}
+      <div style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 14,
+        padding: '16px 18px',
+        marginBottom: 16,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-muted)', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 4 }}>
+            {todayLog ? "Today's Weight" : "Latest Recorded"}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span className="mono-num display" style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--ink-primary)' }}>
+              {currentWeight}
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-muted)' }}>kg</span>
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'right' }}>
+          {diffFromPrev !== null ? (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '6px 12px',
+              borderRadius: 99,
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--glass-border)',
+              fontSize: 12,
+              fontWeight: 600,
+              color: diffFromPrev < 0 ? 'var(--accent-green)' : diffFromPrev > 0 ? (user?.goal === 'bulk' ? 'var(--accent-blue)' : 'var(--accent-amber)') : 'var(--ink-muted)'
+            }}>
+              {diffFromPrev < 0 ? <TrendingDown size={14} /> : diffFromPrev > 0 ? <TrendingUp size={14} /> : <Minus size={14} />}
+              <span>{diffFromPrev > 0 ? `+${diffFromPrev}` : diffFromPrev} kg</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--ink-muted)', fontWeight: 500 }}>
+              Baseline set
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 4 }}>
+            vs previous log
+          </div>
+        </div>
+      </div>
+
+      {/* ── Log / Update Controls ── */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <button
+            type="button"
+            onClick={() => handleAdjust(-0.1)}
+            className="btn-secondary"
+            style={{ width: 44, height: 44, padding: 0, borderRadius: 12, fontSize: 20, fontWeight: 600, flexShrink: 0 }}>
+            -
+          </button>
+
+          <div style={{ flex: 1, position: 'relative' }}>
+            <input
+              type="number"
+              step="0.1"
+              min="20"
+              max="300"
+              value={inputWeight}
+              onChange={(e) => setInputWeight(e.target.value === '' ? '' : parseFloat(e.target.value))}
+              placeholder="e.g. 74.5"
+              className="mono-num"
+              style={{
+                width: '100%',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--glass-border)',
+                borderRadius: 12,
+                color: 'var(--ink-primary)',
+                padding: '11px 40px 11px 16px',
+                fontSize: 16,
+                fontWeight: 600,
+                textAlign: 'center',
+                outline: 'none',
+                transition: 'border-color 0.2s',
+              }}
+            />
+            <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 13, fontWeight: 500, color: 'var(--ink-muted)', pointerEvents: 'none' }}>
+              kg
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleAdjust(0.1)}
+            className="btn-secondary"
+            style={{ width: 44, height: 44, padding: 0, borderRadius: 12, fontSize: 20, fontWeight: 600, flexShrink: 0 }}>
+            +
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSubmitting || !inputWeight}
+            className="btn-primary"
+            style={{
+              padding: '11px 18px',
+              borderRadius: 12,
+              fontWeight: 600,
+              fontSize: 13,
+              minWidth: 108,
+              background: savedToast ? 'var(--accent-green)' : 'var(--ink-primary)',
+              transition: 'background 0.3s ease, transform 0.15s ease',
+            }}>
+            {savedToast ? (
+              <motion.span initial={{ scale: 0.8 }} animate={{ scale: 1 }} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Check size={16} /> Saved!
+              </motion.span>
+            ) : isSubmitting ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : todayLog ? (
+              'Update'
+            ) : (
+              'Log Weight'
+            )}
+          </button>
+        </div>
+
+        {/* Quick nudge chips */}
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+          {[-0.5, -0.2, 0.2, 0.5].map((delta) => (
+            <button
+              key={delta}
+              type="button"
+              onClick={() => handleAdjust(delta)}
+              className="btn-secondary"
+              style={{ padding: '4px 10px', fontSize: 11, borderRadius: 8, color: 'var(--ink-secondary)' }}>
+              {delta > 0 ? `+${delta}` : delta}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── 7-Day History Mini Strip ── */}
+      <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Past 7 Days
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage('analytics')}
+            style={{ background: 'transparent', border: 'none', color: 'var(--ink-primary)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0, cursor: 'pointer' }}>
+            View Trends <ChevronRight size={14} />
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+          {last7Days.map(({ day, weight, isToday }, idx) => (
+            <div
+              key={idx}
+              style={{
+                background: isToday ? 'var(--bg-elevated)' : 'transparent',
+                border: `1px solid ${isToday ? 'var(--ink-primary)' : 'var(--glass-border)'}`,
+                borderRadius: 10,
+                padding: '8px 4px',
+                textAlign: 'center',
+                transition: 'all 0.2s',
+              }}>
+              <div style={{ fontSize: 10, color: isToday ? 'var(--ink-primary)' : 'var(--ink-muted)', fontWeight: isToday ? 700 : 500, marginBottom: 4 }}>
+                {day}
+              </div>
+              <div className="mono-num" style={{ fontSize: 12, fontWeight: weight ? 600 : 400, color: weight ? 'var(--ink-primary)' : 'var(--ink-faint)' }}>
+                {weight !== null ? weight : '—'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 // ── Full Dashboard (Part 2) ───────────────────────────────────
-const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, setPage }) => {
+const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, weightLogs, saveWeight, setPage }) => {
   const [waterGoal, setWaterGoal] = useState(() => Number(localStorage.getItem('waterGoal')) || 8);
   useEffect(() => localStorage.setItem('waterGoal', waterGoal), [waterGoal]);
 
   const todayL  = logs.filter(l => isToday(l.date));
-  const sum     = k => todayL.reduce((a, l) => a + (l.food[k] || 0) * l.qty, 0);
-  const tCal    = sum('cal');
-  const tProt   = sum('protein');
-  const tCarbs  = sum('carbs');
-  const tFat    = sum('fat');
+  const { tCal, tProt, tCarbs, tFat } = todayL.reduce(
+    (acc, l) => {
+      acc.tCal += (l.food.cal || 0) * l.qty;
+      acc.tProt += (l.food.protein || 0) * l.qty;
+      acc.tCarbs += (l.food.carbs || 0) * l.qty;
+      acc.tFat += (l.food.fat || 0) * l.qty;
+      return acc;
+    },
+    { tCal: 0, tProt: 0, tCarbs: 0, tFat: 0 }
+  );
 
   const gCal    = user?.calories || 2500;
   const gProt   = user?.protein  || 150;
@@ -817,6 +1286,14 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, se
           })}
         </div>
       </motion.div>
+
+      {/* ── Daily Body Weight Log ── */}
+      <DailyBodyWeightCard
+        user={user}
+        weightLogs={weightLogs}
+        saveWeight={saveWeight}
+        setPage={setPage}
+      />
       
       {/* ── Today's Meals ── */}
       <motion.div variants={itemVars} className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
@@ -1197,7 +1674,241 @@ const MICROS = [
   { key:'zinc',      label:'Zinc',        rda:11,   unit:'mg',  color:'var(--accent-amber)', icon: '🦪' },
 ];
 
-const Analytics = ({ user, logs }) => {
+// ── Weight Trends Component (Stats Single Graph with Timeline Filters) ──
+const WeightTrends = ({ user, weightLogs = [], setPage }) => {
+  const [timeline, setTimeline] = useState('weekly'); // 'weekly' | 'monthly' | 'yearly'
+  const fallbackWeight = user?.weight || 70;
+
+  const data = processWeightTimeline(weightLogs, timeline, fallbackWeight);
+  const { points, current, diff, min, max, avg, rangeLabel } = data;
+
+  const userGoal = user?.goal || 'maintain';
+  const targetWeight = userGoal === 'bulk'
+    ? parseFloat(((user?.weight || 70) + 3).toFixed(1))
+    : userGoal === 'cut'
+    ? parseFloat(((user?.weight || 70) - 4).toFixed(1))
+    : (user?.weight || 70);
+
+  const isHealthyTrend = userGoal === 'cut' ? diff <= 0 : userGoal === 'bulk' ? diff >= 0 : Math.abs(diff) <= 0.8;
+  const changeColor = isHealthyTrend
+    ? (userGoal === 'bulk' ? 'var(--accent-blue)' : 'var(--accent-green)')
+    : (userGoal === 'cut' ? 'var(--accent-amber)' : 'var(--ink-secondary)');
+
+  // Y-axis bounds with gentle padding so chart curve is accentuated
+  const yMin = Math.floor(Math.min(min, targetWeight) - 0.8);
+  const yMax = Math.ceil(Math.max(max, targetWeight) + 0.8);
+
+  const goalInsightText = userGoal === 'cut'
+    ? (diff <= 0
+        ? `Great pacing! You have dropped ${Math.abs(diff)} kg in this period, staying well within a healthy fat-loss deficit.`
+        : `Weight is up ${diff} kg. Normal water fluctuation, or consider checking your daily calorie deficit.`)
+    : userGoal === 'bulk'
+    ? (diff >= 0
+        ? `Clean bulk on track! +${diff} kg gained in this period with steady progressive overload.`
+        : `Weight dipped ${Math.abs(diff)} kg. Ensure you are hitting your +300 kcal lean surplus target.`)
+    : `Weight is steady around ${avg} kg (delta: ${diff > 0 ? '+' : ''}${diff} kg), ideal for recomposition.`;
+
+  const CustomWeightTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0].payload;
+    const diffFromFirst = parseFloat((d.weight - points[0].weight).toFixed(1));
+    return (
+      <div style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 12,
+        boxShadow: 'var(--shadow-md)',
+        color: 'var(--ink-primary)',
+        fontSize: 12,
+        padding: '12px 14px',
+        minWidth: 150,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-muted)', marginBottom: 4 }}>
+          {d.fullDate || d.date}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
+          <span className="mono-num display" style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink-primary)' }}>
+            {d.weight}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-muted)' }}>kg</span>
+          {d.isLogged ? (
+            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--accent-green)', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', borderRadius: 4, marginLeft: 'auto' }}>
+              Logged
+            </span>
+          ) : (
+            <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--ink-muted)', marginLeft: 'auto' }}>
+              Trend
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span>Net:</span>
+          <strong className="mono-num" style={{ color: diffFromFirst === 0 ? 'var(--ink-muted)' : diffFromFirst < 0 ? 'var(--accent-green)' : 'var(--accent-blue)' }}>
+            {diffFromFirst > 0 ? `+${diffFromFirst}` : diffFromFirst} kg
+          </strong>
+          <span style={{ color: 'var(--ink-muted)', fontSize: 10 }}>(from period start)</span>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 10 },
+        show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } }
+      }}
+      className="glass-card"
+      style={{ marginBottom: 20, padding: 20 }}>
+      {/* ── Card Header + Timeline Filter Pills ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ background: 'var(--bg-elevated)', padding: 7, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Scale size={18} color="var(--ink-primary)" />
+          </div>
+          <div>
+            <div className="title" style={{ fontSize: 16 }}>Weight Trends</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>{rangeLabel}</div>
+          </div>
+        </div>
+
+        {/* Timeline Tabs */}
+        <div style={{
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--glass-border)',
+          borderRadius: 10,
+          padding: 3,
+          display: 'inline-flex',
+          gap: 2,
+        }}>
+          {[
+            { key: 'weekly',  label: 'Weekly'  },
+            { key: 'monthly', label: 'Monthly' },
+            { key: 'yearly',  label: 'Yearly'  },
+          ].map(({ key, label }) => {
+            const active = timeline === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTimeline(key)}
+                style={{
+                  position: 'relative',
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: active ? 600 : 500,
+                  border: 'none',
+                  background: active ? 'var(--bg-surface)' : 'transparent',
+                  color: active ? 'var(--ink-primary)' : 'var(--ink-muted)',
+                  boxShadow: active ? 'var(--shadow-sm)' : 'none',
+                  cursor: 'pointer',
+                  transition: 'color 0.2s ease, background 0.2s ease',
+                }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Period Summary Metrics Strip ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 18 }}>
+        {[
+          { label: 'Current', val: `${current} kg`, color: 'var(--ink-primary)' },
+          {
+            label: 'Net Change',
+            val: `${diff > 0 ? '+' : ''}${diff} kg`,
+            color: changeColor,
+            icon: diff < 0 ? <TrendingDown size={12} /> : diff > 0 ? <TrendingUp size={12} /> : null
+          },
+          { label: 'Min / Max', val: `${min} - ${max}`, color: 'var(--ink-secondary)' },
+          { label: 'Average', val: `${avg} kg`, color: 'var(--ink-secondary)' },
+        ].map(({ label, val, color, icon }, idx) => (
+          <div
+            key={idx}
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 10,
+              padding: '10px 8px',
+              textAlign: 'center',
+            }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 4 }}>
+              {label}
+            </div>
+            <div className="mono-num" style={{ fontSize: 13, fontWeight: 700, color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+              {icon} {val}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── The Single Responsive Graph ── */}
+      <div style={{ width: '100%', height: 210 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={points} margin={{ top: 12, right: 8, left: -20, bottom: 0 }}>
+            <defs>
+              <linearGradient id="weightAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--ink-primary)" stopOpacity={0.14} />
+                <stop offset="100%" stopColor="var(--ink-primary)" stopOpacity={0.0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
+            <ReferenceLine
+              y={targetWeight}
+              stroke="var(--ink-faint)"
+              strokeDasharray="4 4"
+              label={{ value: `Target: ${targetWeight}kg`, position: 'insideTopRight', fill: 'var(--ink-muted)', fontSize: 10 }}
+            />
+            <XAxis
+              dataKey="label"
+              tick={{ fill: 'var(--ink-muted)', fontSize: 11, fontWeight: 500 }}
+              axisLine={false}
+              tickLine={false}
+              interval={timeline === 'monthly' ? 4 : 0}
+            />
+            <YAxis
+              domain={[yMin, yMax]}
+              tick={{ fill: 'var(--ink-muted)', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => `${v}`}
+            />
+            <Tooltip content={<CustomWeightTooltip />} cursor={{ stroke: 'var(--ink-faint)', strokeWidth: 1, strokeDasharray: '3 3' }} />
+            <Area
+              type="monotone"
+              dataKey="weight"
+              stroke="var(--ink-primary)"
+              strokeWidth={2.5}
+              fill="url(#weightAreaGrad)"
+              dot={{ fill: 'var(--bg-surface)', stroke: 'var(--ink-primary)', strokeWidth: 2, r: timeline === 'monthly' ? 2 : 3.5 }}
+              activeDot={{ r: 6, fill: 'var(--ink-primary)', stroke: 'var(--bg-surface)', strokeWidth: 2 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── Smart Goal Insight Footer ── */}
+      <div style={{
+        marginTop: 14,
+        paddingTop: 12,
+        borderTop: '1px solid var(--glass-border)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        fontSize: 12,
+        color: 'var(--ink-secondary)',
+        lineHeight: 1.5,
+      }}>
+        <Sparkles size={16} color="var(--ink-primary)" style={{ flexShrink: 0 }} />
+        <span>{goalInsightText}</span>
+      </div>
+    </motion.div>
+  );
+};
+
+const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
   const gCal  = user?.calories || 2500;
   const gProt = user?.protein  || 150;
 
@@ -1228,9 +1939,16 @@ const Analytics = ({ user, logs }) => {
   ].filter(d => d.value > 0);
 
   // Micronutrient totals for today
+  const microTotals = todayL.reduce((acc, l) => {
+    MICROS.forEach(m => {
+      acc[m.key] = (acc[m.key] || 0) + (l.food[m.key] || 0) * l.qty;
+    });
+    return acc;
+  }, {});
+
   const microVals = MICROS.map(m => ({
     ...m,
-    value: todayL.reduce((a, l) => a + (l.food[m.key] || 0) * l.qty, 0),
+    value: microTotals[m.key] || 0,
   }));
 
   // Weekly averages for summary pills
@@ -1274,7 +1992,7 @@ const Analytics = ({ user, logs }) => {
       {/* Header */}
       <motion.div variants={itemVars} style={{ marginBottom: 24 }}>
         <h1 className="display" style={{ fontSize: 24, fontWeight: 600, color: 'var(--ink-primary)', marginBottom: 4, letterSpacing: '-0.02em' }}>Analytics</h1>
-        <p style={{ fontSize: 13, color: 'var(--ink-muted)', fontWeight: 500 }}>Your 7-day nutrition overview</p>
+        <p style={{ fontSize: 13, color: 'var(--ink-muted)', fontWeight: 500 }}>Nutrition & Body Weight Trends Analytics</p>
       </motion.div>
 
       {/* Weekly summary pills */}
@@ -1290,6 +2008,9 @@ const Analytics = ({ user, logs }) => {
           </div>
         ))}
       </motion.div>
+
+      {/* ── Weight Trends (Weekly, Monthly, Yearly single graph with timeline filters) ── */}
+      <WeightTrends user={user} weightLogs={weightLogs} setPage={setPage} />
 
       {/* Weekly Calories Bar Chart */}
       <motion.div variants={itemVars} className="glass-card" style={{ marginBottom: 20, padding: 20 }}>
@@ -1951,6 +2672,7 @@ export default function Healthify() {
   const [demoUser, setDemoUser]   = useState(null);
   const [demoLogs, setDemoLogs]   = useState(mkTodayLogs);
   const [demoWater, setDemoWater] = useState(5);
+  const [demoWeightLogs, setDemoWeightLogs] = useState(() => mkDemoWeightLogs(75, 'bulk'));
 
   // Auto-navigate when auth state resolves
   useEffect(() => {
@@ -1965,9 +2687,10 @@ export default function Healthify() {
   }, [authUser, authLoading, supaData.profile, supaData.loading, demoMode, page]);
 
   // ── Resolve active data source (demo vs real) ──
-  const activeUser  = demoMode ? demoUser  : supaData.profile;
-  const activeLogs  = demoMode ? demoLogs  : supaData.logs;
-  const activeWater = demoMode ? demoWater : supaData.water;
+  const activeUser       = demoMode ? demoUser       : supaData.profile;
+  const activeLogs       = demoMode ? demoLogs       : supaData.logs;
+  const activeWater      = demoMode ? demoWater      : supaData.water;
+  const activeWeightLogs = demoMode ? demoWeightLogs : supaData.weightLogs;
 
   const handleAddFoodLog = demoMode
     ? (f, qty, meal) => setDemoLogs(p => [...p, { id: Date.now(), food: f, qty, mealType: meal, date: new Date().toISOString() }])
@@ -1979,11 +2702,34 @@ export default function Healthify() {
     ? (id) => setDemoLogs(p => p.filter(l => l.id !== id))
     : supaData.deleteFoodLog;
   const handleSaveWater = demoMode ? setDemoWater : supaData.saveWater;
+  const handleSaveWeight = demoMode
+    ? async (w, d) => {
+        const today = new Date().toISOString().split('T')[0];
+        const logDate = d || today;
+        const numWeight = parseFloat(Number(w).toFixed(1));
+        setDemoWeightLogs(prev => {
+          const idx = prev.findIndex(l => l.logged_at === logDate);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], weight: numWeight };
+            return updated;
+          }
+          const updated = [...prev, { id: 'demo_w_' + Date.now(), weight: numWeight, logged_at: logDate }];
+          updated.sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
+          return updated;
+        });
+        if (logDate === today) {
+          setDemoUser(u => u ? { ...u, weight: numWeight } : u);
+        }
+        return { data: { weight: numWeight, logged_at: logDate }, error: null };
+      }
+    : supaData.saveWeightLog;
 
   // ── Handlers ──
   const handleFinish = async (userData) => {
     if (demoMode) {
       setDemoUser(userData);
+      setDemoWeightLogs(mkDemoWeightLogs(userData.weight || 75, userData.goal || 'bulk'));
       setPage('dashboard');
     } else {
       const { error } = await supaData.saveProfile(userData);
@@ -1998,6 +2744,7 @@ export default function Healthify() {
       carbs: 295, fat: 88, gender: 'male', activity: 'moderate',
       age: 23, weight: 75, height: 175, tdee: 2550, bmr: 1844,
     });
+    setDemoWeightLogs(mkDemoWeightLogs(75, 'bulk'));
     setPage('dashboard');
   };
 
@@ -2007,6 +2754,7 @@ export default function Healthify() {
       setDemoUser(null);
       setDemoLogs(mkTodayLogs);
       setDemoWater(5);
+      setDemoWeightLogs(mkDemoWeightLogs(75, 'bulk'));
     } else {
       await signOut();
     }
@@ -2048,11 +2796,13 @@ export default function Healthify() {
         <Dashboard
           user={activeUser} logs={activeLogs}
           addFoodLog={handleAddFoodLog} deleteFoodLog={handleDeleteFoodLog}
-          water={activeWater} saveWater={handleSaveWater} setPage={setPage}
+          water={activeWater} saveWater={handleSaveWater}
+          weightLogs={activeWeightLogs} saveWeight={handleSaveWeight}
+          setPage={setPage}
         />
       )}
       {page === 'foodlog'   && <FoodLog user={activeUser} logs={activeLogs} addFoodLog={handleAddFoodLog} addCustomFoodLog={handleAddCustomFoodLog} deleteFoodLog={handleDeleteFoodLog} demoMode={demoMode} />}
-      {page === 'analytics' && <Analytics user={activeUser} logs={activeLogs} />}
+      {page === 'analytics' && <Analytics user={activeUser} logs={activeLogs} weightLogs={activeWeightLogs} setPage={setPage} />}
       {page === 'chat'      && <Chat user={activeUser} logs={activeLogs} addCustomFoodLog={handleAddCustomFoodLog} demoMode={demoMode} />}
       {page === 'profile'   && <Profile user={activeUser} logs={activeLogs} setPage={setPage} signOut={handleSignOut} />}
       <TabBar page={page} setPage={setPage} />

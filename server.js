@@ -5,6 +5,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import nutritionRoutes from './server/routes/nutritionRoutes.js';
+import weightRoutes from './server/routes/weightRoutes.js';
 import { errorHandler } from './server/middleware/errorHandler.js';
 
 // Load .env.local (same file Vite reads)
@@ -98,6 +99,9 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
 // ── Nutrition Analysis API ──
 app.use('/api/nutrition', nutritionRoutes);
+
+// ── Weight Tracking API ──
+app.use('/api/weight', weightRoutes);
 
 // ── Centralized error handler (must be after all routes) ──
 app.use(errorHandler);
