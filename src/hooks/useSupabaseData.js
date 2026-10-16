@@ -77,18 +77,22 @@ export function useSupabaseData(authUser, FOOD_DB) {
     return { data, error };
   };
 
-  // ── Food logs (load 7 days for Analytics) ─────────────────
+  // ── Food logs (load past 14 days for Analytics & trends) ─────────────────
   const loadLogs = async () => {
     const start = new Date();
-    start.setDate(start.getDate() - 6);
+    start.setDate(start.getDate() - 14);
     start.setHours(0, 0, 0, 0);
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('food_logs')
       .select('*')
       .eq('user_id', authUser.id)
       .gte('logged_at', start.toISOString())
       .order('logged_at', { ascending: true });
+
+    if (error) {
+      console.error("loadLogs error:", error);
+    }
 
     const mapped = (data || []).map(mapLog);
     setLogs(mapped);
@@ -102,29 +106,30 @@ export function useSupabaseData(authUser, FOOD_DB) {
         food: {
           id: 9999,
           name: row.custom_name,
-          cal: row.custom_cal,
-          protein: row.custom_protein,
-          carbs: row.custom_carbs,
-          fat: row.custom_fat,
-          iron: row.custom_iron,
-          calcium: row.custom_calcium,
-          vitD: row.custom_vitd,
-          vitB12: row.custom_vitb12,
-          magnesium: row.custom_magnesium,
-          zinc: row.custom_zinc,
+          cal: row.custom_cal || 0,
+          protein: row.custom_protein || 0,
+          carbs: row.custom_carbs || 0,
+          fat: row.custom_fat || 0,
+          iron: row.custom_iron || 0,
+          calcium: row.custom_calcium || 0,
+          vitD: row.custom_vitd || 0,
+          vitB12: row.custom_vitb12 || 0,
+          magnesium: row.custom_magnesium || 0,
+          zinc: row.custom_zinc || 0,
           e: '✨',
           unit: 'custom',
         },
-        qty: row.quantity,
-        mealType: row.meal_type,
+        qty: row.quantity || 1,
+        mealType: row.meal_type || 'snack',
         date: row.logged_at,
       };
     }
+    const matched = FOOD_DB.find((f) => f.id === row.food_id);
     return {
       id:       row.id,
-      food:     FOOD_DB.find((f) => f.id === row.food_id) || FOOD_DB[0],
-      qty:      row.quantity,
-      mealType: row.meal_type,
+      food:     matched || { ...FOOD_DB[0], cal: row.custom_cal || FOOD_DB[0].cal, protein: row.custom_protein || FOOD_DB[0].protein },
+      qty:      row.quantity || 1,
+      mealType: row.meal_type || 'snack',
       date:     row.logged_at,
     };
   };

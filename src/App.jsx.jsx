@@ -213,13 +213,94 @@ const FOOD_DB = [
 
 const isToday = d => new Date(d).toDateString() === new Date().toDateString();
 
-const mkTodayLogs = () => [
-  {id:1, food:FOOD_DB[3],  qty:3,   mealType:'breakfast', date:new Date().toISOString()},
-  {id:2, food:FOOD_DB[4],  qty:0.5, mealType:'breakfast', date:new Date().toISOString()},
-  {id:3, food:FOOD_DB[8],  qty:1,   mealType:'breakfast', date:new Date().toISOString()},
-  {id:4, food:FOOD_DB[0],  qty:1.5, mealType:'lunch',     date:new Date().toISOString()},
-  {id:5, food:FOOD_DB[1],  qty:1,   mealType:'lunch',     date:new Date().toISOString()},
-];
+// ── 7-Day Demo Food Logs (generates full past week + today) ───────────
+const mkDemoFoodLogs = () => {
+  const list = [];
+  const now = new Date();
+
+  const templates = [
+    // 6 days ago
+    [
+      { fIdx: 0, qty: 1.5, m: 'lunch' },     // Chicken
+      { fIdx: 1, qty: 1.5, m: 'lunch' },     // Brown Rice
+      { fIdx: 4, qty: 1.0, m: 'breakfast' }, // Oats
+      { fIdx: 5, qty: 1.0, m: 'snack' },     // Whey Protein
+      { fIdx: 18, qty: 2.0, m: 'snack' },    // Peanut Butter
+    ],
+    // 5 days ago
+    [
+      { fIdx: 3, qty: 3.0, m: 'breakfast' }, // Eggs
+      { fIdx: 14, qty: 2.0, m: 'lunch' },    // Chapati
+      { fIdx: 6, qty: 1.5, m: 'lunch' },     // Dal
+      { fIdx: 2, qty: 1.0, m: 'dinner' },    // Paneer
+      { fIdx: 10, qty: 1.0, m: 'snack' },    // Greek Yogurt
+    ],
+    // 4 days ago
+    [
+      { fIdx: 4, qty: 1.0, m: 'breakfast' }, // Oats
+      { fIdx: 8, qty: 1.0, m: 'breakfast' }, // Whole Milk
+      { fIdx: 0, qty: 1.8, m: 'lunch' },     // Chicken
+      { fIdx: 1, qty: 1.0, m: 'lunch' },     // Brown Rice
+      { fIdx: 12, qty: 1.0, m: 'dinner' },   // Salmon
+    ],
+    // 3 days ago
+    [
+      { fIdx: 3, qty: 4.0, m: 'breakfast' }, // Eggs
+      { fIdx: 7, qty: 1.0, m: 'breakfast' }, // Banana
+      { fIdx: 15, qty: 1.5, m: 'lunch' },    // Rajma
+      { fIdx: 1, qty: 1.0, m: 'lunch' },     // Brown Rice
+      { fIdx: 5, qty: 1.0, m: 'snack' },     // Whey Protein
+    ],
+    // 2 days ago (day before yesterday)
+    [
+      { fIdx: 4, qty: 1.0, m: 'breakfast' }, // Oats
+      { fIdx: 18, qty: 2.0, m: 'breakfast' },// Peanut Butter
+      { fIdx: 0, qty: 1.6, m: 'lunch' },     // Chicken
+      { fIdx: 1, qty: 1.0, m: 'lunch' },     // Brown Rice
+      { fIdx: 2, qty: 1.0, m: 'dinner' },    // Paneer
+      { fIdx: 5, qty: 1.0, m: 'snack' },     // Whey Protein
+    ],
+    // 1 day ago (yesterday)
+    [
+      { fIdx: 3, qty: 3.0, m: 'breakfast' }, // Eggs
+      { fIdx: 7, qty: 1.0, m: 'breakfast' }, // Banana
+      { fIdx: 0, qty: 1.8, m: 'lunch' },     // Chicken Breast
+      { fIdx: 1, qty: 1.5, m: 'lunch' },     // Brown Rice
+      { fIdx: 6, qty: 1.0, m: 'dinner' },    // Dal
+      { fIdx: 10, qty: 1.0, m: 'snack' },    // Greek Yogurt
+    ],
+    // 0 days ago (today)
+    [
+      { fIdx: 3, qty: 3.0, m: 'breakfast' },
+      { fIdx: 4, qty: 0.5, m: 'breakfast' },
+      { fIdx: 8, qty: 1.0, m: 'breakfast' },
+      { fIdx: 0, qty: 1.5, m: 'lunch' },
+      { fIdx: 1, qty: 1.0, m: 'lunch' },
+    ]
+  ];
+
+  let idCounter = 1;
+  templates.forEach((dayItems, dayOffset) => {
+    const daysAgo = 6 - dayOffset;
+    const d = new Date(now);
+    d.setDate(d.getDate() - daysAgo);
+    if (daysAgo > 0) d.setHours(13, 0, 0, 0);
+    const isoDate = d.toISOString();
+
+    dayItems.forEach(item => {
+      list.push({
+        id: idCounter++,
+        food: FOOD_DB[item.fIdx] || FOOD_DB[0],
+        qty: item.qty,
+        mealType: item.m,
+        date: isoDate,
+      });
+    });
+  });
+
+  return list;
+};
+const mkTodayLogs = mkDemoFoodLogs;
 
 // ── Weight timeline data generator & processors ───────────────
 const mkDemoWeightLogs = (currentWeight = 75, goal = 'bulk') => {
@@ -2126,20 +2207,28 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
   const weekData = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
-    const dl = logs.filter(l => new Date(l.date).toDateString() === d.toDateString());
+    const targetDateStr = d.toDateString();
+
+    const dl = logs.filter(l => {
+      const rawDate = l.date || l.logged_at;
+      if (!rawDate) return false;
+      return new Date(rawDate).toDateString() === targetDateStr;
+    });
+
     const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     return {
       day:      days[d.getDay()],
-      calories: Math.round(dl.reduce((a, l) => a + l.food.cal     * l.qty, 0)),
-      protein:  Math.round(dl.reduce((a, l) => a + l.food.protein * l.qty, 0)),
+      dateStr:  d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      calories: Math.round(dl.reduce((a, l) => a + (l.food?.cal || l.food?.calories || 0) * (l.qty || 1), 0)),
+      protein:  Math.round(dl.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0)),
     };
   });
 
   // Today macros for pie
-  const todayL = logs.filter(l => isToday(l.date));
-  const tProt  = todayL.reduce((a, l) => a + l.food.protein * l.qty, 0);
-  const tCarbs = todayL.reduce((a, l) => a + l.food.carbs   * l.qty, 0);
-  const tFat   = todayL.reduce((a, l) => a + l.food.fat     * l.qty, 0);
+  const todayL = logs.filter(l => isToday(l.date || l.logged_at));
+  const tProt  = todayL.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0);
+  const tCarbs = todayL.reduce((a, l) => a + (l.food?.carbs || 0) * (l.qty || 1), 0);
+  const tFat   = todayL.reduce((a, l) => a + (l.food?.fat || 0) * (l.qty || 1), 0);
   const totalKcal = Math.round(tProt*4 + tCarbs*4 + tFat*9);
 
   const pieData = [
@@ -2151,7 +2240,7 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
   // Micronutrient totals for today
   const microTotals = todayL.reduce((acc, l) => {
     MICROS.forEach(m => {
-      acc[m.key] = (acc[m.key] || 0) + (l.food[m.key] || 0) * l.qty;
+      acc[m.key] = (acc[m.key] || 0) + (l.food?.[m.key] || 0) * (l.qty || 1);
     });
     return acc;
   }, {});
@@ -2168,6 +2257,7 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
+    const item = payload[0]?.payload;
     return (
       <div style={{
         background: 'var(--bg-elevated)',
@@ -2177,7 +2267,10 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
         color: 'var(--ink-primary)',
         fontSize: 12, padding: '12px 16px'
       }}>
-        <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--ink-secondary)' }}>{label}</div>
+        <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--ink-secondary)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span>{label}</span>
+          {item?.dateStr && <span style={{ color: 'var(--ink-muted)', fontWeight: 400 }}>{item.dateStr}</span>}
+        </div>
         {payload.map(p => (
           <div className="mono-num" key={p.dataKey} style={{ color: p.color || 'var(--accent-green)', fontWeight: 500, marginBottom: 4 }}>
             {p.dataKey === 'calories' ? `${p.value} kcal` : `${p.value}g protein`}
@@ -2236,7 +2329,18 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
             <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--bg-elevated)' }} />
             <Bar dataKey="calories" radius={[4, 4, 0, 0]}>
               {weekData.map((entry, i) => (
-                <Cell key={i} fill={entry.calories >= gCal * 0.9 ? 'var(--accent-green)' : 'var(--glass-border)'} />
+                <Cell
+                  key={i}
+                  fill={
+                    entry.calories === 0
+                      ? 'transparent'
+                      : entry.calories >= gCal * 0.9 && entry.calories <= gCal * 1.15
+                      ? 'var(--accent-green)'
+                      : entry.calories > gCal * 1.15
+                      ? 'var(--accent-amber)'
+                      : 'var(--ink-primary)'
+                  }
+                />
               ))}
             </Bar>
           </BarChart>
@@ -2952,9 +3056,18 @@ export default function Healthify() {
   const [page, setPage]         = useState('landing');
   const [demoMode, setDemoMode] = useState(false);
 
-  // Demo state (in-memory, not persisted)
+  // Demo state (persisted to localStorage so demo users retain logged meals across days/refreshes)
   const [demoUser, setDemoUser]   = useState(null);
-  const [demoLogs, setDemoLogs]   = useState(mkTodayLogs);
+  const [demoLogs, setDemoLogs]   = useState(() => {
+    try {
+      const saved = localStorage.getItem('healthify_demo_logs');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return mkDemoFoodLogs();
+  });
   const [demoWater, setDemoWater] = useState(5);
   const [demoWeightLogs, setDemoWeightLogs] = useState(() => mkDemoWeightLogs(75, 'bulk'));
 
@@ -3004,13 +3117,25 @@ export default function Healthify() {
   const activeWeightLogs = demoMode ? demoWeightLogs : supaData.weightLogs;
 
   const handleAddFoodLog = demoMode
-    ? (f, qty, meal) => setDemoLogs(p => [...p, { id: Date.now(), food: f, qty, mealType: meal, date: new Date().toISOString() }])
+    ? (f, qty, meal) => setDemoLogs(p => {
+        const next = [...p, { id: Date.now(), food: f, qty, mealType: meal, date: new Date().toISOString() }];
+        try { localStorage.setItem('healthify_demo_logs', JSON.stringify(next)); } catch (e) {}
+        return next;
+      })
     : supaData.addFoodLog;
   const handleAddCustomFoodLog = demoMode
-    ? (f, qty, meal) => setDemoLogs(p => [...p, { id: Date.now(), food: { ...f, id: 9999, unit: 'custom' }, qty, mealType: meal, date: new Date().toISOString() }])
+    ? (f, qty, meal) => setDemoLogs(p => {
+        const next = [...p, { id: Date.now(), food: { ...f, id: 9999, unit: 'custom' }, qty, mealType: meal, date: new Date().toISOString() }];
+        try { localStorage.setItem('healthify_demo_logs', JSON.stringify(next)); } catch (e) {}
+        return next;
+      })
     : supaData.addCustomFoodLog;
   const handleDeleteFoodLog = demoMode
-    ? (id) => setDemoLogs(p => p.filter(l => l.id !== id))
+    ? (id) => setDemoLogs(p => {
+        const next = p.filter(l => l.id !== id);
+        try { localStorage.setItem('healthify_demo_logs', JSON.stringify(next)); } catch (e) {}
+        return next;
+      })
     : supaData.deleteFoodLog;
   const handleSaveWater = demoMode ? setDemoWater : supaData.saveWater;
   const handleSaveWeight = demoMode
@@ -3056,6 +3181,7 @@ export default function Healthify() {
       age: 23, weight: 75, height: 175, tdee: 2550, bmr: 1844,
     });
     setDemoWeightLogs(mkDemoWeightLogs(75, 'bulk'));
+    setDemoLogs(prev => prev.length > 0 ? prev : mkDemoFoodLogs());
     setPage('dashboard');
   };
 
@@ -3067,7 +3193,8 @@ export default function Healthify() {
     if (demoMode) {
       setDemoMode(false);
       setDemoUser(null);
-      setDemoLogs(mkTodayLogs);
+      setDemoLogs(mkDemoFoodLogs());
+      try { localStorage.removeItem('healthify_demo_logs'); } catch (e) {}
       setDemoWater(5);
       setDemoWeightLogs(mkDemoWeightLogs(75, 'bulk'));
     } else {
