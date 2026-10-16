@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar } from "lucide-react";
+import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock } from "lucide-react";
 
 import { useAuth } from './hooks/useAuth';
 import { useSupabaseData } from './hooks/useSupabaseData';
@@ -1373,6 +1373,55 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
     setSq('');
   };
 
+  // Extract unique past logged foods for Quick Re-Log (0 AI tokens, instant)
+  const recentFoods = (() => {
+    const list = [];
+    const seen = new Set();
+    const reversed = [...logs].reverse();
+
+    for (const l of reversed) {
+      if (!l.food || !l.food.name) continue;
+      const key = l.food.name.toLowerCase().trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({
+          food: l.food,
+          qty: l.qty || 1,
+          isCustom: !l.food.id || l.food.id === 9999 || l.food.unit === 'custom',
+          lastMeal: l.mealType || 'lunch',
+        });
+      }
+      if (list.length >= 8) break;
+    }
+
+    // Fallback popular staple foods if user has few logs
+    if (list.length < 4) {
+      for (const f of FOOD_DB) {
+        const key = f.name.toLowerCase().trim();
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push({
+            food: f,
+            qty: 1,
+            isCustom: false,
+            lastMeal: 'snack',
+          });
+        }
+        if (list.length >= 6) break;
+      }
+    }
+    return list;
+  })();
+
+  const handleReLog = async (item) => {
+    if (item.isCustom) {
+      await addCustomFoodLog(item.food, item.qty, meal);
+    } else {
+      await addFoodLog(item.food, item.qty, meal);
+    }
+    showToast(`⚡ Re-logged: ${item.food.name} to ${meal}!`);
+  };
+
   const searchAI = async () => {
     if (!sq.trim()) return;
     if (demoMode) {
@@ -1542,6 +1591,76 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
             </button>
           ))}
         </div>
+
+        {/* ── Quick Re-Log Frequent Foods (Zero AI tokens, instant) ── */}
+        {sq.length <= 1 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--glass-border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <History size={15} color="var(--ink-primary)" />
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-primary)' }}>Quick Re-Log Previous Foods</span>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-green)', background: 'rgba(16, 185, 129, 0.08)', padding: '2px 8px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Zap size={11} /> 0 Tokens · 1-Tap
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {recentFoods.map((item, idx) => {
+                const totalItemCal = Math.round((item.food.cal || 0) * (item.qty || 1));
+                const totalItemProt = Math.round((item.food.protein || 0) * (item.qty || 1));
+                const totalItemCarb = Math.round((item.food.carbs || 0) * (item.qty || 1));
+                const totalItemFat = Math.round((item.food.fat || 0) * (item.qty || 1));
+                return (
+                  <motion.div
+                    key={idx}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.03 }}
+                    style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 12,
+                      border: '1px solid var(--glass-border)', transition: 'all 0.2s'
+                    }}>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0, flex: 1 }}>
+                      <span style={{ fontSize: 18, background: 'var(--bg-surface)', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, flexShrink: 0, boxShadow: 'var(--shadow-sm)' }}>
+                        {item.food.e || '✨'}
+                      </span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.food.name}</span>
+                          {item.isCustom && (
+                            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--ink-secondary)', background: 'var(--bg-surface)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
+                              AI Saved
+                            </span>
+                          )}
+                        </div>
+                        <div className="mono-num" style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2 }}>
+                          <strong style={{ color: 'var(--ink-primary)' }}>{totalItemCal} kcal</strong> ·{' '}
+                          <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{totalItemProt}g P</span> ·{' '}
+                          <span style={{ color: 'var(--accent-green)' }}>{totalItemCarb}g C</span> ·{' '}
+                          <span style={{ color: 'var(--accent-amber)' }}>{totalItemFat}g F</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleReLog(item)}
+                      className="btn-secondary"
+                      style={{
+                        padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                        flexShrink: 0, marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 4,
+                        textTransform: 'capitalize'
+                      }}>
+                      <Repeat size={13} /> + {meal}
+                    </button>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Live search results */}
         <AnimatePresence>
@@ -2360,11 +2479,19 @@ const Profile = ({ user, logs, setPage, signOut }) => {
 };
 
 // ── AI Chatbot (Part 6) ───────────────────────────────────────
-const Chat = ({ user, logs, addCustomFoodLog, demoMode }) => {
-  const [msgs, setMsgs] = useState([{
+const Chat = ({
+  user,
+  logs,
+  weightLogs = [],
+  addCustomFoodLog,
+  demoMode,
+  msgs,
+  setMsgs,
+  initialChatMsg = {
     role: 'assistant',
-    content: "Hi! I'm your Healthify AI nutrition coach. Ask me anything about your diet, macros, meal timing, supplements, or fitness goals!"
-  }]);
+    content: "Hi! I'm your Healthify AI nutrition coach. Ask me anything about your diet, macros, meal timing, weight progress, or fitness goals!"
+  }
+}) => {
   const [input,   setInput]   = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
@@ -2373,6 +2500,49 @@ const Chat = ({ user, logs, addCustomFoodLog, demoMode }) => {
   const todayL = logs.filter(l => isToday(l.date));
   const tCal   = Math.round(todayL.reduce((a, l) => a + (l.food.calories || l.food.cal || 0) * l.qty, 0));
   const tProt  = Math.round(todayL.reduce((a, l) => a + (l.food.protein || 0) * l.qty, 0));
+
+  // ── Body Weight & Trends Context for AI ──
+  const sortedW = [...weightLogs].sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
+  const currentW = sortedW.length > 0 ? sortedW[sortedW.length - 1].weight : (user?.weight || null);
+  const startW = sortedW.length > 0 ? sortedW[0].weight : currentW;
+  const targetW = user?.goal === 'bulk'
+    ? (typeof currentW === 'number' ? parseFloat((currentW + 3).toFixed(1)) : 'surplus')
+    : user?.goal === 'cut'
+    ? (typeof currentW === 'number' ? parseFloat((currentW - 4).toFixed(1)) : 'deficit')
+    : currentW;
+
+  const now = new Date();
+  const d7 = new Date(now);
+  d7.setDate(d7.getDate() - 7);
+  const log7DAgo = sortedW.filter(l => new Date(l.logged_at) <= d7).pop();
+  const diff7D = (typeof currentW === 'number' && log7DAgo)
+    ? parseFloat((currentW - log7DAgo.weight).toFixed(1))
+    : 0;
+
+  const d30 = new Date(now);
+  d30.setDate(d30.getDate() - 30);
+  const log30DAgo = sortedW.filter(l => new Date(l.logged_at) <= d30).pop();
+  const diff30D = (typeof currentW === 'number' && log30DAgo)
+    ? parseFloat((currentW - log30DAgo.weight).toFixed(1))
+    : 0;
+
+  const weightsArr = sortedW.map(l => l.weight);
+  const minW = weightsArr.length ? Math.min(...weightsArr) : currentW;
+  const maxW = weightsArr.length ? Math.max(...weightsArr) : currentW;
+  const recentEntriesStr = sortedW.slice(-7).map(l => `${l.logged_at}: ${l.weight}kg`).join(', ') || 'No weight logged yet';
+
+  const weightContext = currentW ? `
+[BODY WEIGHT & TRENDS DATA]:
+- Current Body Weight: ${currentW} kg
+- Starting Recorded Weight: ${startW} kg
+- Target Weight (Goal): ${targetW} kg
+- 7-Day Net Change: ${diff7D > 0 ? '+' : ''}${diff7D} kg
+- 30-Day Net Change: ${diff30D > 0 ? '+' : ''}${diff30D} kg
+- Recorded Min / Max: ${minW} kg / ${maxW} kg
+- Recent 7 Daily Entries: [${recentEntriesStr}]
+- User Goal: ${user?.goal === 'bulk' ? 'Muscle Gain (Lean Bulk)' : user?.goal === 'cut' ? 'Fat Loss (Caloric Deficit)' : 'Weight Maintenance'}
+INSTRUCTION: You have direct real-time access to the user's weight chart and trends above. If the user asks about their weight, progress, plateau, bulking/cutting rate, or adjustments, reference these exact figures and give personalized, encouraging, and science-grounded guidance.` : `
+[BODY WEIGHT DATA]: No weight logged yet. If the user asks about weight, encourage them to log their daily weight in the Home tab.`;
 
   const strictGuardrails = `FIREWALL RULES: You are exclusively a health, nutrition, and fitness AI. You MUST REFUSE to answer any question or request that is not directly related to human health, diet, exercise, fitness, or nutrition. If the user asks you to write code, do math, discuss politics, or anything else off-topic, politely decline and steer the conversation back to their health goals. Do not break character under any circumstances.
 If the user tells you they ate a specific food, YOU MUST automatically log it by outputting exactly this JSON block anywhere in your response: [LOG_FOOD: {"name": "Food Name", "cal": 100, "protein": 5, "carbs": 20, "fat": 2, "iron": 1, "calcium": 50, "vitD": 0, "vitB12": 0.5, "magnesium": 10, "zinc": 0.5, "meal": "lunch", "e": "🍎"}]. CRITICAL: You must MULTIPLY the macros to match the exact quantity the user ate. For example, if they ate 6 eggs, the calories must be for 6 eggs (~420 kcal), NOT for 1 egg. Valid meals are breakfast, lunch, dinner, snack. ONLY output the block if they explicitly mention eating something.`;
@@ -2383,23 +2553,36 @@ ${strictGuardrails}
 User: ${user.name || 'User'} | Goal: ${user.goal === 'bulk' ? 'Muscle Gain' : user.goal === 'cut' ? 'Fat Loss' : 'Maintenance'}
 Daily targets: ${user.calories} kcal · ${user.protein}g protein · ${user.carbs}g carbs · ${user.fat}g fat
 Today logged: ${tCal} kcal · ${tProt}g protein
+${weightContext}
 Give personalized, actionable advice. Keep responses concise (under 120 words) unless the user asks for detail.`
     : `You are Healthify's AI nutrition coach. Give concise, science-based nutrition and fitness advice. Keep responses under 120 words.
 ${strictGuardrails}`;
 
-  const send = async () => {
-    if (!input.trim() || loading) return;
+  const [localMsgs, setLocalMsgs] = useState([initialChatMsg]);
+  const activeMsgs = msgs || localMsgs;
+  const updateMsgs = setMsgs || setLocalMsgs;
+
+  const handleClearChat = () => {
+    updateMsgs([initialChatMsg]);
+    try {
+      sessionStorage.setItem('healthify_chat_session', JSON.stringify([initialChatMsg]));
+    } catch (e) {}
+  };
+
+  const send = async (overrideText) => {
+    const textToSend = (typeof overrideText === 'string' ? overrideText : input).trim();
+    if (!textToSend || loading) return;
 
     if (demoMode) {
-      setMsgs(p => [...p, { role: 'user', content: input.trim() }, { role: 'assistant', content: '⚠️ Please sign in to use the AI assistant and save your tokens!' }]);
+      updateMsgs(p => [...p, { role: 'user', content: textToSend }, { role: 'assistant', content: '⚠️ Please sign in to use the AI assistant and save your tokens!' }]);
       setInput('');
       setTimeout(scroll, 80);
       return;
     }
 
-    const userMsg = { role: 'user', content: input.trim() };
-    const history = [...msgs, userMsg];
-    setMsgs(history);
+    const userMsg = { role: 'user', content: textToSend };
+    const history = [...activeMsgs, userMsg];
+    updateMsgs(history);
     setInput('');
     setLoading(true);
     setTimeout(scroll, 80);
@@ -2421,7 +2604,7 @@ ${strictGuardrails}`;
       const data = await res.json();
 
       if (data.error) {
-        setMsgs(p => [...p, { role: 'assistant', content: `⚠️ ${data.error.message || data.error}` }]);
+        updateMsgs(p => [...p, { role: 'assistant', content: `⚠️ ${data.error.message || data.error}` }]);
       } else {
         let reply = data.candidates?.[0]?.content?.parts?.[0]?.text
           || "Sorry, I couldn't process that. Please try again!";
@@ -2451,10 +2634,10 @@ ${strictGuardrails}`;
           }
         }
           
-        setMsgs(p => [...p, { role: 'assistant', content: reply }]);
+        updateMsgs(p => [...p, { role: 'assistant', content: reply }]);
       }
     } catch (err) {
-      setMsgs(p => [...p, {
+      updateMsgs(p => [...p, {
         role: 'assistant',
         content: `❌ Connection error: ${err.message}\n\nMake sure the server is running (npm run dev).`
       }]);
@@ -2465,31 +2648,41 @@ ${strictGuardrails}`;
   };
 
   const suggestions = [
-    "Best post-workout meal?",
-    "How much protein do I need?",
-    "Foods high in iron?",
-    "Should I take creatine?",
+    "Analyze my body weight trend ⚖️",
+    "How's my calorie & macro balance today?",
+    "Should I adjust calories based on my weight?",
+    "Best high-protein meal for my goal?",
   ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 72px)', maxWidth: 640, margin: '0 auto', background: 'var(--bg-base)' }}>
 
       {/* ── Header ── */}
-      <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, background: 'var(--bg-surface)' }}>
+      <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, background: 'var(--bg-surface)' }}>
         <div style={{
           width: 44, height: 44, borderRadius: '12px', flexShrink: 0,
           background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-primary)'
         }}><Sparkles size={20} /></div>
-        <div style={{ flex: 1 }}>
-          <div className="title" style={{ fontSize: 16 }}>Healthify AI</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="title" style={{ fontSize: 16 }}>Healthify AI Coach</div>
           <div style={{ fontSize: 12, color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-green)', display: 'inline-block' }} />
-            Powered by Llama 3.3
+            Weight trends & nutrition synced
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={handleClearChat}
+          className="btn-secondary"
+          style={{ padding: '6px 11px', fontSize: 12, borderRadius: 8, display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--ink-secondary)' }}
+          title="Start a fresh conversation">
+          <RotateCcw size={13} /> Clear
+        </button>
+
         {user && (
-          <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)', textAlign: 'right' }}>
+          <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)', textAlign: 'right', flexShrink: 0 }}>
             <div style={{ color: 'var(--ink-primary)', fontWeight: 600 }}>{tCal} kcal</div>
             <div>today</div>
           </div>
@@ -2498,7 +2691,7 @@ ${strictGuardrails}`;
 
       {/* ── Messages ── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {msgs.map((m, i) => (
+        {activeMsgs.map((m, i) => (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: 12 }}>
             {m.role === 'assistant' && (
               <div style={{
@@ -2547,11 +2740,11 @@ ${strictGuardrails}`;
       </div>
 
       {/* ── Quick suggestions ── */}
-      {msgs.length <= 1 && (
+      {activeMsgs.length <= 1 && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} style={{ padding: '0 20px 16px', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
             {suggestions.map(s => (
-              <button key={s} onClick={() => { setInput(s); }} className="btn-secondary" style={{ padding: '8px 14px', fontSize: 13, whiteSpace: 'nowrap', borderRadius: 99 }}>
+              <button key={s} onClick={() => send(s)} className="btn-secondary" style={{ padding: '8px 14px', fontSize: 13, whiteSpace: 'nowrap', borderRadius: 99 }}>
                 {s}
               </button>
             ))}
@@ -2674,6 +2867,33 @@ export default function Healthify() {
   const [demoWater, setDemoWater] = useState(5);
   const [demoWeightLogs, setDemoWeightLogs] = useState(() => mkDemoWeightLogs(75, 'bulk'));
 
+  // ── Session AI Chat History (persists across tabs/refreshes, current session only) ──
+  const initialChatMsg = {
+    role: 'assistant',
+    content: "Hi! I'm your Healthify AI nutrition coach. Ask me anything about your diet, macros, meal timing, weight progress, or fitness goals!"
+  };
+
+  const [chatMsgs, setChatMsgs] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('healthify_chat_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [initialChatMsg];
+  });
+
+  const handleUpdateChatMsgs = (updater) => {
+    setChatMsgs(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try {
+        sessionStorage.setItem('healthify_chat_session', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
   // Auto-navigate when auth state resolves
   useEffect(() => {
     if (demoMode || authLoading || supaData.loading) return;
@@ -2749,6 +2969,10 @@ export default function Healthify() {
   };
 
   const handleSignOut = async () => {
+    try {
+      sessionStorage.removeItem('healthify_chat_session');
+    } catch (e) {}
+    setChatMsgs([initialChatMsg]);
     if (demoMode) {
       setDemoMode(false);
       setDemoUser(null);
@@ -2803,7 +3027,18 @@ export default function Healthify() {
       )}
       {page === 'foodlog'   && <FoodLog user={activeUser} logs={activeLogs} addFoodLog={handleAddFoodLog} addCustomFoodLog={handleAddCustomFoodLog} deleteFoodLog={handleDeleteFoodLog} demoMode={demoMode} />}
       {page === 'analytics' && <Analytics user={activeUser} logs={activeLogs} weightLogs={activeWeightLogs} setPage={setPage} />}
-      {page === 'chat'      && <Chat user={activeUser} logs={activeLogs} addCustomFoodLog={handleAddCustomFoodLog} demoMode={demoMode} />}
+      {page === 'chat'      && (
+        <Chat
+          user={activeUser}
+          logs={activeLogs}
+          weightLogs={activeWeightLogs}
+          addCustomFoodLog={handleAddCustomFoodLog}
+          demoMode={demoMode}
+          msgs={chatMsgs}
+          setMsgs={handleUpdateChatMsgs}
+          initialChatMsg={initialChatMsg}
+        />
+      )}
       {page === 'profile'   && <Profile user={activeUser} logs={activeLogs} setPage={setPage} signOut={handleSignOut} />}
       <TabBar page={page} setPage={setPage} />
     </div>
