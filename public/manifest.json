@@ -1,0 +1,62 @@
+{
+  "name": "Healthify · AI Nutrition & Macro Tracker",
+  "short_name": "Healthify",
+  "description": "AI-powered personalized nutrition and macro tracking with real-time analytics, body weight trends, and AI coaching.",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FAFAF9",
+  "theme_color": "#09090B",
+  "orientation": "portrait-primary",
+  "categories": ["health", "fitness", "lifestyle", "medical"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Log Food",
+      "short_name": "Log Food",
+      "description": "Log your breakfast, lunch, dinner, or snack",
+      "url": "/?page=foodlog",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI Nutrition Coach",
+      "short_name": "AI Coach",
+      "description": "Chat with your AI nutrition assistant",
+      "url": "/?page=chat",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Nutrition Stats",
+      "short_name": "Stats",
+      "description": "View weekly calories and protein trends",
+      "url": "/?page=analytics",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

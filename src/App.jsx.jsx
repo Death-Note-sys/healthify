@@ -4,10 +4,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock } from "lucide-react";
+import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock, Smartphone, Download } from "lucide-react";
 
 import { useAuth } from './hooks/useAuth';
 import { useSupabaseData } from './hooks/useSupabaseData';
+import { usePWAInstall } from './hooks/usePWAInstall';
 import Auth from './components/Auth';
 
 // ── Global styles (fonts + animations) ──────────────────────
@@ -2485,7 +2486,7 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
 };
 
 // ── Profile Page (Part 5) ─────────────────────────────────────
-const Profile = ({ user, logs, setPage, signOut }) => {
+const Profile = ({ user, logs, setPage, signOut, pwa }) => {
   if (!user) return (
     <div style={{ minHeight: 'calc(100vh - 72px)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: 24, textAlign: 'center' }}>
       <User size={48} color="var(--ink-muted)" style={{ marginBottom: 16 }} />
@@ -2702,6 +2703,56 @@ const Profile = ({ user, logs, setPage, signOut }) => {
             </div>
           ))}
         </div>
+      </motion.div>
+
+      {/* ── Progressive Web App (Mobile & Desktop Installation) ── */}
+      <motion.div variants={itemVars} className="glass-card" style={{ marginTop: 16, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <Smartphone size={18} color="var(--accent-green)" />
+          <div className="title" style={{ fontSize: 16 }}>Mobile & Desktop App</div>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--ink-secondary)', lineHeight: 1.5, marginBottom: 16 }}>
+          Install Healthify to your home screen for full-screen offline tracking, lightning-fast launch, and zero browser bars.
+        </p>
+
+        {pwa?.isInstalled ? (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
+            background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)',
+            borderRadius: 12, color: 'var(--accent-green)', fontSize: 13, fontWeight: 600
+          }}>
+            <Check size={18} /> Healthify App Installed (Standalone Mode)
+          </div>
+        ) : pwa?.isInstallable ? (
+          <button
+            onClick={pwa.promptInstall}
+            className="btn-primary"
+            style={{ width: '100%', padding: '14px', fontSize: 14, gap: 10 }}
+          >
+            <Download size={18} /> Install Healthify on this Device
+          </button>
+        ) : pwa?.isIOS ? (
+          <div style={{
+            background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
+            borderRadius: 12, padding: '14px 16px', fontSize: 13, color: 'var(--ink-primary)', lineHeight: 1.6
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>📲 Install on iPhone / iPad:</span>
+            </div>
+            <ol style={{ paddingLeft: 18, margin: 0, color: 'var(--ink-secondary)' }}>
+              <li>Tap the <strong>Share</strong> button (⎋) at the bottom of Safari.</li>
+              <li>Scroll down and tap <strong>Add to Home Screen</strong> (⊞).</li>
+              <li>Tap <strong>Add</strong> in the top-right corner.</li>
+            </ol>
+          </div>
+        ) : (
+          <div style={{
+            background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
+            borderRadius: 12, padding: '12px 16px', fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.5
+          }}>
+            💻 To install on Chrome or Edge on PC/Mac, click the <strong>Install</strong> icon in the right side of your browser address bar.
+          </div>
+        )}
       </motion.div>
 
       {/* ── Logout ── */}
@@ -3097,12 +3148,26 @@ export default function Healthify() {
   // ── Auth ──
   const { user: authUser, loading: authLoading, signOut } = useAuth();
 
+  // ── Progressive Web App (PWA) Install State & Controller ──
+  const pwa = usePWAInstall();
+
   // ── Supabase data (only active when authenticated) ──
   const supaData = useSupabaseData(authUser, FOOD_DB);
 
   // ── Navigation & demo mode ──
   const [page, setPage]         = useState('landing');
   const [demoMode, setDemoMode] = useState(false);
+
+  // Handle PWA shortcut navigation (e.g. launching from phone home screen)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const target = params.get('page');
+      if (target && ['dashboard', 'foodlog', 'analytics', 'chat', 'profile'].includes(target)) {
+        setPage(target);
+      }
+    } catch (e) {}
+  }, []);
 
   // Demo state (persisted to localStorage so demo users retain logged meals across days/refreshes)
   const [demoUser, setDemoUser]   = useState(null);
@@ -3307,7 +3372,7 @@ export default function Healthify() {
           initialChatMsg={initialChatMsg}
         />
       )}
-      {page === 'profile'   && <Profile user={activeUser} logs={activeLogs} setPage={setPage} signOut={handleSignOut} />}
+      {page === 'profile'   && <Profile user={activeUser} logs={activeLogs} setPage={setPage} signOut={handleSignOut} pwa={pwa} />}
       <TabBar page={page} setPage={setPage} />
     </div>
   );
