@@ -14,13 +14,17 @@ const STATIC_ASSETS = [
   '/icons/icon.svg',
 ];
 
-// Install Event: pre-cache core static shell
+// Install Event: pre-cache core static shell safely
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('PWA: Some static assets failed to cache', err);
-      });
+    caches.open(CACHE_NAME).then(async (cache) => {
+      for (const asset of STATIC_ASSETS) {
+        try {
+          await cache.add(asset);
+        } catch (e) {
+          console.warn(`PWA: Pre-caching ${asset} skipped:`, e.message);
+        }
+      }
     })
   );
   self.skipWaiting();
@@ -46,13 +50,15 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // 1. Never cache non-GET requests or backend API / Supabase calls
-  if (request.method !== 'GET') return;
+  // 1. Only handle standard HTTP/HTTPS GET requests
+  if (request.method !== 'GET' || !url.protocol.startsWith('http')) return;
+
+  // 2. Never cache backend API routes, rate-limited proxies, or Supabase cloud DB requests
   if (url.pathname.startsWith('/api/') || url.hostname.includes('supabase.co')) {
     return;
   }
 
-  // 2. Navigation requests: Network-first, fallback to cached index.html
+  // 3. Navigation requests: Network-first, fallback to cached index.html
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).catch(() => {
@@ -62,12 +68,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Static assets & Google Fonts: Stale-While-Revalidate
+  // 4. Static assets & Google Fonts / CDN icons: Stale-While-Revalidate
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       const fetchPromise = fetch(request)
         .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          if (
+            networkResponse &&
+            networkResponse.status === 200 &&
+            (networkResponse.type === 'basic' || networkResponse.type === 'cors')
+          ) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);

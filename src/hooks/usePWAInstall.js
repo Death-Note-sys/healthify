@@ -39,7 +39,7 @@ export function usePWAInstall() {
     window.addEventListener('appinstalled', handleAppInstalled);
 
     // 4. Register Service Worker
-    if ('serviceWorker' in navigator && (process.env.NODE_ENV === 'production' || window.location.hostname === 'localhost')) {
+    if ('serviceWorker' in navigator && (import.meta.env.PROD || window.location.hostname === 'localhost')) {
       navigator.serviceWorker
         .register('/sw.js')
         .then((reg) => {

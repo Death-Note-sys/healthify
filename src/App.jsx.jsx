@@ -3348,7 +3348,7 @@ export default function Healthify() {
 
   // ── Main App ──
   return (
-    <div style={{ ...BASE, paddingBottom: 72 }}><GlobalStyle />
+    <div style={{ ...BASE, paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}><GlobalStyle />
       {page === 'dashboard' && (
         <Dashboard
           user={activeUser} logs={activeLogs}
