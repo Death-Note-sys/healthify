@@ -1208,13 +1208,13 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
   const [waterGoal, setWaterGoal] = useState(() => Number(localStorage.getItem('waterGoal')) || 8);
   useEffect(() => localStorage.setItem('waterGoal', waterGoal), [waterGoal]);
 
-  const todayL  = logs.filter(l => isToday(l.date));
+  const todayL  = logs.filter(l => isToday(l.date || l.logged_at));
   const { tCal, tProt, tCarbs, tFat } = todayL.reduce(
     (acc, l) => {
-      acc.tCal += (l.food.cal || 0) * l.qty;
-      acc.tProt += (l.food.protein || 0) * l.qty;
-      acc.tCarbs += (l.food.carbs || 0) * l.qty;
-      acc.tFat += (l.food.fat || 0) * l.qty;
+      acc.tCal += (l.food?.cal || l.food?.calories || 0) * (l.qty || 1);
+      acc.tProt += (l.food?.protein || 0) * (l.qty || 1);
+      acc.tCarbs += (l.food?.carbs || 0) * (l.qty || 1);
+      acc.tFat += (l.food?.fat || 0) * (l.qty || 1);
       return acc;
     },
     { tCal: 0, tProt: 0, tCarbs: 0, tFat: 0 }
@@ -1226,14 +1226,25 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
   const gFat    = user?.fat      || 70;
 
   const getStreak = () => {
-    if (!logs.length) return 0;
-    const dates = [...new Set(logs.map(l => new Date(l.date).toDateString()))];
+    if (!logs || !logs.length) return 0;
+    const dateStrings = logs
+      .map(l => {
+        const raw = l.date || l.logged_at || l.created_at;
+        if (!raw) return null;
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d.toDateString();
+      })
+      .filter(Boolean);
+
+    const dates = new Set(dateStrings);
+    if (dates.size === 0) return 0;
+
     let s = 0;
     let curr = new Date();
-    if (!dates.includes(curr.toDateString())) {
+    if (!dates.has(curr.toDateString())) {
       curr.setDate(curr.getDate() - 1);
     }
-    while (dates.includes(curr.toDateString())) {
+    while (dates.has(curr.toDateString())) {
       s++;
       curr.setDate(curr.getDate() - 1);
     }
@@ -1251,7 +1262,7 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
     .map(m => ({ m, items: todayL.filter(l => l.mealType === m) }))
     .filter(g => g.items.length > 0);
 
-  const loggedIds = new Set(todayL.map(l => l.food.id));
+  const loggedIds = new Set(todayL.map(l => l.food?.id).filter(Boolean));
   const recs = FOOD_DB
     .filter(f => f.protein >= 10 && !loggedIds.has(f.id))
     .sort((a, b) => b.protein - a.protein)
@@ -1438,9 +1449,9 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
-  const todayL = logs.filter(l => isToday(l.date));
-  const tCal   = todayL.reduce((a, l) => a + l.food.cal     * l.qty, 0);
-  const tProt  = todayL.reduce((a, l) => a + l.food.protein * l.qty, 0);
+  const todayL = logs.filter(l => isToday(l.date || l.logged_at));
+  const tCal   = todayL.reduce((a, l) => a + (l.food?.cal || 0) * (l.qty || 1), 0);
+  const tProt  = todayL.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0);
   const gCal   = user?.calories || 2500;
   const gProt  = user?.protein  || 150;
 
@@ -1449,8 +1460,12 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
     : [];
 
   const addLog = async f => {
-    await addFoodLog(f, qty, meal);
-    showToast(`${f.e} ${f.name} added to ${meal}!`);
+    const res = await addFoodLog(f, qty, meal);
+    if (res?.error) {
+      showToast(`⚠️ Saved locally, cloud sync error: ${res.error.message || 'Check database'}`);
+    } else {
+      showToast(`${f.e} ${f.name} added to ${meal}!`);
+    }
     setSq('');
   };
 
@@ -1530,12 +1545,17 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
   })();
 
   const handleReLog = async (item) => {
+    let res;
     if (item.isCustom) {
-      await addCustomFoodLog(item.food, item.qty, meal);
+      res = await addCustomFoodLog(item.food, item.qty, meal);
     } else {
-      await addFoodLog(item.food, item.qty, meal);
+      res = await addFoodLog(item.food, item.qty, meal);
     }
-    showToast(`⚡ Re-logged: ${item.food.name} to ${meal}!`);
+    if (res?.error) {
+      showToast(`⚠️ Saved locally, cloud sync error: ${res.error.message || 'Check database'}`);
+    } else {
+      showToast(`⚡ Re-logged: ${item.food.name} to ${meal}!`);
+    }
   };
 
   const searchAI = async () => {
@@ -2469,21 +2489,32 @@ const Profile = ({ user, logs, setPage, signOut }) => {
   const bmiStatus = bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese';
   const bmiColor  = bmi < 18.5 ? 'var(--accent-blue)' : bmi < 25 ? 'var(--accent-green)' : bmi < 30 ? 'var(--accent-amber)' : 'var(--accent-red)';
 
-  const todayL    = logs.filter(l => isToday(l.date));
-  const todayProt = todayL.reduce((a, l) => a + (l.food.protein || 0) * l.qty, 0);
-  const todayCarbs = todayL.reduce((a, l) => a + (l.food.carbs || 0) * l.qty, 0);
-  const todayFat   = todayL.reduce((a, l) => a + (l.food.fat || 0) * l.qty, 0);
+  const todayL    = logs.filter(l => isToday(l.date || l.logged_at));
+  const todayProt = todayL.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0);
+  const todayCarbs = todayL.reduce((a, l) => a + (l.food?.carbs || 0) * (l.qty || 1), 0);
+  const todayFat   = todayL.reduce((a, l) => a + (l.food?.fat || 0) * (l.qty || 1), 0);
   const totalLogs  = logs.length;
 
   const getStreak = () => {
-    if (!logs.length) return 0;
-    const dates = [...new Set(logs.map(l => new Date(l.date).toDateString()))];
+    if (!logs || !logs.length) return 0;
+    const dateStrings = logs
+      .map(l => {
+        const raw = l.date || l.logged_at || l.created_at;
+        if (!raw) return null;
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d.toDateString();
+      })
+      .filter(Boolean);
+
+    const dates = new Set(dateStrings);
+    if (dates.size === 0) return 0;
+
     let s = 0;
     let curr = new Date();
-    if (!dates.includes(curr.toDateString())) {
+    if (!dates.has(curr.toDateString())) {
       curr.setDate(curr.getDate() - 1);
     }
-    while (dates.includes(curr.toDateString())) {
+    while (dates.has(curr.toDateString())) {
       s++;
       curr.setDate(curr.getDate() - 1);
     }

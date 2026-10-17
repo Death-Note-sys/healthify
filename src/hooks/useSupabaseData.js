@@ -19,6 +19,18 @@ export function useSupabaseData(authUser, FOOD_DB) {
   useEffect(() => {
     setActiveUserId(authUser?.id || null);
     if (authUser) {
+      // 1. Instantly restore cached food logs for this specific user
+      const localLogsKey = `healthify_user_logs_${authUser.id}`;
+      try {
+        const cached = localStorage.getItem(localLogsKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setLogs(parsed);
+          }
+        }
+      } catch (e) {}
+
       loadAll();
     } else {
       setProfile(null);
@@ -45,7 +57,6 @@ export function useSupabaseData(authUser, FOOD_DB) {
     
     if (error && error.code !== 'PGRST116') {
       console.error("loadProfile err", error);
-      alert("loadProfile error: " + error.message);
     }
     
     if (data) {
@@ -70,36 +81,73 @@ export function useSupabaseData(authUser, FOOD_DB) {
     
     if (error) {
       console.error("saveProfile error:", error);
-      alert("Failed to save profile: " + error.message);
     }
     
     if (!error && data) setProfile(data);
     return { data, error };
   };
 
-  // ── Food logs (load past 14 days for Analytics & trends) ─────────────────
+  // ── Food logs (load past 30 days for full analytics & trends) ─────────────────
   const loadLogs = async () => {
+    if (!authUser?.id) return;
+    const localKey = `healthify_user_logs_${authUser.id}`;
+
+    // Read local cache first for instant responsiveness
+    try {
+      const cached = localStorage.getItem(localKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLogs(parsed);
+        }
+      }
+    } catch (e) {}
+
     const start = new Date();
-    start.setDate(start.getDate() - 14);
+    start.setDate(start.getDate() - 30);
     start.setHours(0, 0, 0, 0);
 
-    const { data, error } = await supabase
-      .from('food_logs')
-      .select('*')
-      .eq('user_id', authUser.id)
-      .gte('logged_at', start.toISOString())
-      .order('logged_at', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('food_logs')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .gte('logged_at', start.toISOString())
+        .order('logged_at', { ascending: true });
 
-    if (error) {
-      console.error("loadLogs error:", error);
+      if (error) {
+        console.warn("loadLogs error from Supabase:", error.message || error);
+        // Retain existing local logs if Supabase query encounters an error
+        return;
+      }
+
+      if (data) {
+        const mappedFromDb = data.map(mapLog);
+        setLogs((prev) => {
+          const mapById = new Map();
+          (prev || []).forEach(l => {
+            const key = l.id || `${l.date}_${l.food?.name}`;
+            mapById.set(String(key), l);
+          });
+          mappedFromDb.forEach(l => {
+            mapById.set(String(l.id), l);
+          });
+          const merged = Array.from(mapById.values());
+          merged.sort((a, b) => new Date(a.date || a.logged_at) - new Date(b.date || b.logged_at));
+          try {
+            localStorage.setItem(localKey, JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.warn("loadLogs exception:", err);
     }
-
-    const mapped = (data || []).map(mapLog);
-    setLogs(mapped);
   };
 
   /** Map a Supabase food_log row → the shape components expect */
   const mapLog = (row) => {
+    const rawDate = row.logged_at || row.created_at || row.date || new Date().toISOString();
     if (!row.food_id && row.custom_name) {
       return {
         id: row.id,
@@ -112,8 +160,8 @@ export function useSupabaseData(authUser, FOOD_DB) {
           fat: row.custom_fat || 0,
           iron: row.custom_iron || 0,
           calcium: row.custom_calcium || 0,
-          vitD: row.custom_vitd || 0,
-          vitB12: row.custom_vitb12 || 0,
+          vitD: row.custom_vitd || row.custom_vitD || 0,
+          vitB12: row.custom_vitb12 || row.custom_vitB12 || 0,
           magnesium: row.custom_magnesium || 0,
           zinc: row.custom_zinc || 0,
           e: '✨',
@@ -121,75 +169,188 @@ export function useSupabaseData(authUser, FOOD_DB) {
         },
         qty: row.quantity || 1,
         mealType: row.meal_type || 'snack',
-        date: row.logged_at,
+        date: rawDate,
+        logged_at: rawDate,
       };
     }
     const matched = FOOD_DB.find((f) => f.id === row.food_id);
     return {
       id:       row.id,
-      food:     matched || { ...FOOD_DB[0], cal: row.custom_cal || FOOD_DB[0].cal, protein: row.custom_protein || FOOD_DB[0].protein },
+      food:     matched || { ...FOOD_DB[0], name: row.custom_name || FOOD_DB[0].name, cal: row.custom_cal || FOOD_DB[0].cal, protein: row.custom_protein || FOOD_DB[0].protein },
       qty:      row.quantity || 1,
       mealType: row.meal_type || 'snack',
-      date:     row.logged_at,
+      date:     rawDate,
+      logged_at: rawDate,
     };
   };
 
   const addFoodLog = async (food, qty, mealType) => {
-    const { data, error } = await supabase
-      .from('food_logs')
-      .insert({
-        user_id:   authUser.id,
-        food_id:   food.id,
-        quantity:  qty,
-        meal_type: mealType,
-      })
-      .select()
-      .single();
+    const tempId = 'temp_' + Date.now();
+    const nowIso = new Date().toISOString();
+    const optimisticLog = {
+      id: tempId,
+      food,
+      qty,
+      mealType,
+      date: nowIso,
+      logged_at: nowIso,
+    };
 
-    if (!error && data) {
-      setLogs((prev) => [...prev, mapLog(data)]);
+    setLogs((prev) => {
+      const next = [...prev, optimisticLog];
+      if (authUser?.id) {
+        try {
+          localStorage.setItem(`healthify_user_logs_${authUser.id}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
+
+    try {
+      const { data, error } = await supabase
+        .from('food_logs')
+        .insert({
+          user_id:   authUser.id,
+          food_id:   food.id,
+          quantity:  qty,
+          meal_type: mealType,
+          logged_at: nowIso,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("addFoodLog supabase error:", error);
+        return { data: optimisticLog, error };
+      }
+
+      if (data) {
+        const serverLog = mapLog(data);
+        setLogs((prev) => {
+          const next = prev.map((l) => (l.id === tempId ? serverLog : l));
+          if (authUser?.id) {
+            try {
+              localStorage.setItem(`healthify_user_logs_${authUser.id}`, JSON.stringify(next));
+            } catch (e) {}
+          }
+          return next;
+        });
+        return { data: serverLog, error: null };
+      }
+      return { data: optimisticLog, error: null };
+    } catch (err) {
+      console.error("addFoodLog network error:", err);
+      return { data: optimisticLog, error: err };
     }
-    return { data, error };
   };
 
   const addCustomFoodLog = async (customFood, qty, mealType) => {
-    const { data, error } = await supabase
-      .from('food_logs')
-      .insert({
-        user_id:        authUser.id,
-        food_id:        null,
-        quantity:       qty,
-        meal_type:      mealType,
-        custom_name:    customFood.name,
-        custom_cal:     Math.round(customFood.cal || 0),
-        custom_protein: Math.round(customFood.protein || 0),
-        custom_carbs:   Math.round(customFood.carbs || 0),
-        custom_fat:     Math.round(customFood.fat || 0),
-        custom_iron:      parseFloat(customFood.iron) || 0,
-        custom_calcium:   parseFloat(customFood.calcium) || 0,
-        custom_vitd:      parseFloat(customFood.vitD) || 0,
-        custom_vitb12:    parseFloat(customFood.vitB12) || 0,
-        custom_magnesium: parseFloat(customFood.magnesium) || 0,
-        custom_zinc:      parseFloat(customFood.zinc) || 0,
-      })
-      .select()
-      .single();
+    const tempId = 'temp_' + Date.now();
+    const nowIso = new Date().toISOString();
+    const optimisticLog = {
+      id: tempId,
+      food: {
+        id: 9999,
+        name: customFood.name,
+        cal: Math.round(customFood.cal || 0),
+        protein: Math.round(customFood.protein || 0),
+        carbs: Math.round(customFood.carbs || 0),
+        fat: Math.round(customFood.fat || 0),
+        iron: parseFloat(customFood.iron) || 0,
+        calcium: parseFloat(customFood.calcium) || 0,
+        vitD: parseFloat(customFood.vitD) || 0,
+        vitB12: parseFloat(customFood.vitB12) || 0,
+        magnesium: parseFloat(customFood.magnesium) || 0,
+        zinc: parseFloat(customFood.zinc) || 0,
+        e: customFood.e || '✨',
+        unit: 'custom',
+      },
+      qty,
+      mealType,
+      date: nowIso,
+      logged_at: nowIso,
+    };
 
-    if (!error && data) {
-      setLogs((prev) => [...prev, mapLog(data)]);
+    setLogs((prev) => {
+      const next = [...prev, optimisticLog];
+      if (authUser?.id) {
+        try {
+          localStorage.setItem(`healthify_user_logs_${authUser.id}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
+
+    try {
+      const { data, error } = await supabase
+        .from('food_logs')
+        .insert({
+          user_id:        authUser.id,
+          food_id:        null,
+          quantity:       qty,
+          meal_type:      mealType,
+          custom_name:    customFood.name,
+          custom_cal:     Math.round(customFood.cal || 0),
+          custom_protein: Math.round(customFood.protein || 0),
+          custom_carbs:   Math.round(customFood.carbs || 0),
+          custom_fat:     Math.round(customFood.fat || 0),
+          custom_iron:      parseFloat(customFood.iron) || 0,
+          custom_calcium:   parseFloat(customFood.calcium) || 0,
+          custom_vitd:      parseFloat(customFood.vitD) || 0,
+          custom_vitb12:    parseFloat(customFood.vitB12) || 0,
+          custom_magnesium: parseFloat(customFood.magnesium) || 0,
+          custom_zinc:      parseFloat(customFood.zinc) || 0,
+          logged_at:      nowIso,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("addCustomFoodLog supabase error:", error);
+        return { data: optimisticLog, error };
+      }
+
+      if (data) {
+        const serverLog = mapLog(data);
+        setLogs((prev) => {
+          const next = prev.map((l) => (l.id === tempId ? serverLog : l));
+          if (authUser?.id) {
+            try {
+              localStorage.setItem(`healthify_user_logs_${authUser.id}`, JSON.stringify(next));
+            } catch (e) {}
+          }
+          return next;
+        });
+        return { data: serverLog, error: null };
+      }
+      return { data: optimisticLog, error: null };
+    } catch (err) {
+      console.error("addCustomFoodLog network error:", err);
+      return { data: optimisticLog, error: err };
     }
-    return { data, error };
   };
 
   const deleteFoodLog = async (logId) => {
-    const { error } = await supabase
-      .from('food_logs')
-      .delete()
-      .eq('id', logId);
-    if (!error) {
-      setLogs((prev) => prev.filter((l) => l.id !== logId));
+    setLogs((prev) => {
+      const next = prev.filter((l) => l.id !== logId);
+      if (authUser?.id) {
+        try {
+          localStorage.setItem(`healthify_user_logs_${authUser.id}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
+
+    try {
+      const { error } = await supabase
+        .from('food_logs')
+        .delete()
+        .eq('id', logId);
+      return { error };
+    } catch (err) {
+      console.error("deleteFoodLog error:", err);
+      return { error: err };
     }
-    return { error };
   };
 
   // ── Water logs ────────────────────────────────────────────
