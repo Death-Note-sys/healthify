@@ -172,6 +172,14 @@ const GOALS = [
   { key: 'bulk',     label: 'Muscle Gain',  emoji: '💪', desc: '300 kcal lean surplus · build mass',    adj: 300,  color: 'var(--accent-blue)', pMult: 2.0 },
 ];
 
+export const MEAL_EMOJIS = {
+  breakfast: '🍳',
+  lunch:     '🥗',
+  dinner:    '🍽️',
+  snack:     '🍎',
+};
+export const getMealEmoji = (mealType) => MEAL_EMOJIS[mealType?.toLowerCase()] || '🍽️';
+
 // ── BMR/TDEE calculation (Mifflin-St Jeor) ──────────────────
 const calcNutrition = (f) => {
   const s   = f.gender === 'male' ? 5 : -161;
@@ -1414,7 +1422,9 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
                 {items.map(l => (
                   <motion.div layout key={l.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, scale: 0.95 }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>{l.food.e}</div>
+                      <div style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
+                        {l.food?.e && l.food?.e !== '✨' ? l.food.e : getMealEmoji(l.mealType || m)}
+                      </div>
                       <div>
                         <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)' }}>{l.food.name}</div>
                         <div style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{l.qty}× {l.food.s}</div>
@@ -1546,15 +1556,17 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
 
   const handleReLog = async (item) => {
     let res;
+    const mealKey = (meal || 'snack').toLowerCase();
+    const mealEmoji = getMealEmoji(mealKey);
     if (item.isCustom) {
-      res = await addCustomFoodLog(item.food, item.qty, meal);
+      res = await addCustomFoodLog({ ...item.food, e: mealEmoji }, item.qty, mealKey);
     } else {
-      res = await addFoodLog(item.food, item.qty, meal);
+      res = await addFoodLog(item.food, item.qty, mealKey);
     }
     if (res?.error) {
       showToast(`⚠️ Saved locally, cloud sync error: ${res.error.message || 'Check database'}`);
     } else {
-      showToast(`⚡ Re-logged: ${item.food.name} to ${meal}!`);
+      showToast(`${mealEmoji} Re-logged: ${item.food.name} to ${meal}!`);
     }
   };
 
@@ -1577,6 +1589,9 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
       
       if (!data.foods || data.foods.length === 0) throw new Error("No foods found.");
       
+      const mealKey = (meal || 'snack').toLowerCase();
+      const mealEmoji = getMealEmoji(mealKey);
+
       for (const item of data.foods) {
         const customFood = {
           name: `${item.quantity} ${item.unit} ${item.food_name}`,
@@ -1590,14 +1605,14 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
           vitB12: item.nutrition?.vitB12 || 0,
           magnesium: item.nutrition?.magnesium || 0,
           zinc: item.nutrition?.zinc || 0,
-          e: { breakfast: '🍳', lunch: '🥗', dinner: '🍽️', snack: '🍎' }[meal] || '✨'
+          e: mealEmoji
         };
-        const { error } = await addCustomFoodLog(customFood, 1, meal);
+        const { error } = await addCustomFoodLog(customFood, 1, mealKey);
         if (error) throw new Error(error.message);
       }
       
       const names = data.foods.map(f => f.food_name).join(', ');
-      showToast(`✨ Logged: ${names}`);
+      showToast(`${mealEmoji} Logged: ${names}`);
       
       if (data.analysis?.summary) {
         setTimeout(() => alert(`AI Analysis:\n\n${data.analysis.summary}`), 2500);
@@ -1775,7 +1790,7 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                       }}>
                       <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0, flex: 1 }}>
                         <span style={{ fontSize: 18, background: 'var(--bg-surface)', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, flexShrink: 0, boxShadow: 'var(--shadow-sm)' }}>
-                          {item.food.e || '✨'}
+                          {item.food?.e && item.food?.e !== '✨' ? item.food.e : getMealEmoji(item.lastMeal)}
                         </span>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1940,7 +1955,9 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                     {items.map(l => (
                       <motion.div layout initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, scale: 0.95 }} key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--glass-border)' }}>
                         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                          <span style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>{l.food.e}</span>
+                          <span style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
+                            {l.food?.e && l.food?.e !== '✨' ? l.food.e : getMealEmoji(l.mealType || m)}
+                          </span>
                           <div>
                             <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)' }}>{l.food.name}</div>
                             <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
@@ -2851,7 +2868,7 @@ ${strictGuardrails}`;
               vitB12: cmd.vitB12,
               magnesium: cmd.magnesium,
               zinc: cmd.zinc,
-              e: { breakfast: '🍳', lunch: '🥗', dinner: '🍽️', snack: '🍎' }[cmd.meal || 'snack'] || '✨'
+              e: getMealEmoji(cmd.meal || 'snack')
             }, 1, cmd.meal || 'snack');
             reply = reply.replace(match[0], '').trim();
             if (!reply) reply = `✅ Logged ${cmd.name} to ${cmd.meal || 'snack'}!`;
@@ -3156,7 +3173,9 @@ export default function Healthify() {
     : supaData.addFoodLog;
   const handleAddCustomFoodLog = demoMode
     ? (f, qty, meal) => setDemoLogs(p => {
-        const next = [...p, { id: Date.now(), food: { ...f, id: 9999, unit: 'custom' }, qty, mealType: meal, date: new Date().toISOString() }];
+        const mealKey = (meal || 'snack').toLowerCase();
+        const emoji = f.e && f.e !== '✨' ? f.e : getMealEmoji(mealKey);
+        const next = [...p, { id: Date.now(), food: { ...f, e: emoji, id: 9999, unit: 'custom' }, qty, mealType: mealKey, date: new Date().toISOString() }];
         try { localStorage.setItem('healthify_demo_logs', JSON.stringify(next)); } catch (e) {}
         return next;
       })

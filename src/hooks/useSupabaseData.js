@@ -7,6 +7,13 @@ import { supabase } from '../lib/supabase';
  * @param {object|null} authUser  – Supabase auth user (from useAuth)
  * @param {Array}       FOOD_DB  – Client-side food database array
  */
+const MEAL_EMOJIS = {
+  breakfast: '🍳',
+  lunch:     '🥗',
+  dinner:    '🍽️',
+  snack:     '🍎',
+};
+
 export function useSupabaseData(authUser, FOOD_DB) {
   const [profile, setProfile]       = useState(null);
   const [logs, setLogs]             = useState([]);
@@ -148,6 +155,9 @@ export function useSupabaseData(authUser, FOOD_DB) {
   /** Map a Supabase food_log row → the shape components expect */
   const mapLog = (row) => {
     const rawDate = row.logged_at || row.created_at || row.date || new Date().toISOString();
+    const mealTypeKey = (row.meal_type || 'snack').toLowerCase();
+    const mealEmoji = MEAL_EMOJIS[mealTypeKey] || '🍽️';
+
     if (!row.food_id && row.custom_name) {
       return {
         id: row.id,
@@ -164,11 +174,11 @@ export function useSupabaseData(authUser, FOOD_DB) {
           vitB12: row.custom_vitb12 || row.custom_vitB12 || 0,
           magnesium: row.custom_magnesium || 0,
           zinc: row.custom_zinc || 0,
-          e: '✨',
+          e: mealEmoji,
           unit: 'custom',
         },
         qty: row.quantity || 1,
-        mealType: row.meal_type || 'snack',
+        mealType: mealTypeKey,
         date: rawDate,
         logged_at: rawDate,
       };
@@ -176,9 +186,9 @@ export function useSupabaseData(authUser, FOOD_DB) {
     const matched = FOOD_DB.find((f) => f.id === row.food_id);
     return {
       id:       row.id,
-      food:     matched || { ...FOOD_DB[0], name: row.custom_name || FOOD_DB[0].name, cal: row.custom_cal || FOOD_DB[0].cal, protein: row.custom_protein || FOOD_DB[0].protein },
+      food:     matched || { ...FOOD_DB[0], name: row.custom_name || FOOD_DB[0].name, cal: row.custom_cal || FOOD_DB[0].cal, protein: row.custom_protein || FOOD_DB[0].protein, e: matched?.e || mealEmoji },
       qty:      row.quantity || 1,
-      mealType: row.meal_type || 'snack',
+      mealType: mealTypeKey,
       date:     rawDate,
       logged_at: rawDate,
     };
@@ -247,6 +257,10 @@ export function useSupabaseData(authUser, FOOD_DB) {
   const addCustomFoodLog = async (customFood, qty, mealType) => {
     const tempId = 'temp_' + Date.now();
     const nowIso = new Date().toISOString();
+    const mealTypeKey = (mealType || 'snack').toLowerCase();
+    const mealEmoji = MEAL_EMOJIS[mealTypeKey] || '🍎';
+    const foodEmoji = (customFood.e && customFood.e !== '✨') ? customFood.e : mealEmoji;
+
     const optimisticLog = {
       id: tempId,
       food: {
@@ -262,11 +276,11 @@ export function useSupabaseData(authUser, FOOD_DB) {
         vitB12: parseFloat(customFood.vitB12) || 0,
         magnesium: parseFloat(customFood.magnesium) || 0,
         zinc: parseFloat(customFood.zinc) || 0,
-        e: customFood.e || '✨',
+        e: foodEmoji,
         unit: 'custom',
       },
       qty,
-      mealType,
+      mealType: mealTypeKey,
       date: nowIso,
       logged_at: nowIso,
     };
