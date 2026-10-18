@@ -75,3 +75,128 @@ export async function analyzeFood(req, res) {
     },
   });
 }
+
+/**
+ * GET /api/nutrition/barcode/:barcode
+ * 
+ * Fetches product metadata from Open Food Facts by barcode (UPC / EAN).
+ * Normalizes serving size, calories, protein, carbs, fat, micronutrients, brand, and product image.
+ */
+export async function getFoodByBarcode(req, res) {
+  const { barcode } = req.params;
+  if (!barcode || !/^\d{4,18}$/.test(barcode.trim())) {
+    return res.status(400).json({ error: { message: 'Invalid barcode format.' } });
+  }
+
+  const cleanBarcode = barcode.trim();
+  const url = `https://world.openfoodfacts.org/api/v2/product/${cleanBarcode}.json`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'HealthifyApp - Web - Version 1.0 - https://github.com/Death-Note-sys/healthify'
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        found: false,
+        barcode: cleanBarcode,
+        error: `Open Food Facts returned status ${response.status}`
+      });
+    }
+
+    const data = await response.json();
+    if (data.status !== 1 || !data.product) {
+      return res.json({
+        found: false,
+        barcode: cleanBarcode,
+        message: data.status_verbose || 'Product not found in Open Food Facts database.'
+      });
+    }
+
+    const p = data.product;
+    const n = p.nutriments || {};
+
+    let cal100 = n['energy-kcal_100g'] ?? n['energy-kcal'] ?? (n['energy_100g'] ? n['energy_100g'] / 4.184 : 0);
+    cal100 = Math.round(Number(cal100) || 0);
+
+    const prot100 = Math.round((Number(n.proteins_100g ?? n.proteins ?? 0)) * 10) / 10;
+    const carb100 = Math.round((Number(n.carbohydrates_100g ?? n.carbohydrates ?? 0)) * 10) / 10;
+    const fat100  = Math.round((Number(n.fat_100g ?? n.fat ?? 0)) * 10) / 10;
+    const fib100  = Math.round((Number(n.fiber_100g ?? n.fiber ?? 0)) * 10) / 10;
+
+    let servingGrams = 100;
+    let servingLabel = p.serving_size || '100g';
+    if (p.serving_quantity) {
+      servingGrams = Number(p.serving_quantity) || 100;
+    } else if (p.serving_size) {
+      const match = p.serving_size.match(/(\d+(?:\.\d+)?)\s*(?:g|ml)/i);
+      if (match) servingGrams = parseFloat(match[1]);
+    }
+
+    let calServing = n['energy-kcal_serving'] ?? (n['energy_serving'] ? n['energy_serving'] / 4.184 : null);
+    if (calServing == null && servingGrams && cal100) {
+      calServing = Math.round((cal100 * servingGrams) / 100);
+    } else {
+      calServing = calServing != null ? Math.round(Number(calServing)) : cal100;
+    }
+
+    const protServing = n.proteins_serving != null
+      ? Math.round(Number(n.proteins_serving) * 10) / 10
+      : Math.round(((prot100 * servingGrams) / 100) * 10) / 10;
+
+    const carbServing = n.carbohydrates_serving != null
+      ? Math.round(Number(n.carbohydrates_serving) * 10) / 10
+      : Math.round(((carb100 * servingGrams) / 100) * 10) / 10;
+
+    const fatServing = n.fat_serving != null
+      ? Math.round(Number(n.fat_serving) * 10) / 10
+      : Math.round(((fat100 * servingGrams) / 100) * 10) / 10;
+
+    const brand = p.brands ? p.brands.split(',')[0].trim() : '';
+    const rawName = p.product_name || p.product_name_en || p.generic_name || 'Packaged Item';
+    const fullName = brand ? `${rawName} (${brand})` : rawName;
+
+    const normalized = {
+      found: true,
+      barcode: cleanBarcode,
+      name: fullName,
+      rawName,
+      brand,
+      image: p.image_front_small_url || p.image_url || null,
+      servingLabel,
+      servingGrams,
+      per100g: {
+        cal: cal100,
+        protein: prot100,
+        carbs: carb100,
+        fat: fat100,
+        fiber: fib100
+      },
+      perServing: {
+        cal: calServing,
+        protein: protServing,
+        carbs: carbServing,
+        fat: fatServing
+      },
+      micronutrients: {
+        iron: Math.round(Number(n.iron_100g || 0) * 1000 * 10) / 10,
+        calcium: Math.round(Number(n.calcium_100g || 0) * 1000 * 10) / 10,
+        sodium: Math.round(Number(n.sodium_100g || 0) * 1000 * 10) / 10,
+        vitD: Number(n['vitamin-d_100g'] || 0),
+        vitB12: Number(n['vitamin-b12_100g'] || 0)
+      },
+      nutriscore: p.nutriscore_grade || null
+    };
+
+    res.json(normalized);
+  } catch (error) {
+    console.error(`[Barcode API] Error fetching barcode ${cleanBarcode}:`, error);
+    res.status(500).json({
+      found: false,
+      barcode: cleanBarcode,
+      error: error.message || 'Internal server error while fetching barcode data.'
+    });
+  }
+}

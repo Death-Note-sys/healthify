@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { analyzeFood } from '../controllers/nutritionController.js';
+import { analyzeFood, getFoodByBarcode } from '../controllers/nutritionController.js';
 
 const router = Router();
 
@@ -77,5 +77,12 @@ const nutritionLimiter = rateLimit({
  * }
  */
 router.post('/analyze', nutritionLimiter, asyncHandler(analyzeFood));
+
+/**
+ * GET /api/nutrition/barcode/:barcode
+ * 
+ * Fetches food details by barcode (UPC / EAN) from Open Food Facts.
+ */
+router.get('/barcode/:barcode', asyncHandler(getFoodByBarcode));
 
 export default router;

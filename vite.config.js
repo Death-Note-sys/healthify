@@ -25,6 +25,9 @@ export default defineConfig({
             if (id.includes('lucide-react')) {
               return 'vendor-icons';
             }
+            if (id.includes('html5-qrcode')) {
+              return 'vendor-scanner';
+            }
           }
         },
       },

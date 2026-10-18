@@ -4,12 +4,13 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock, Smartphone, Download } from "lucide-react";
+import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock, Smartphone, Download, ScanBarcode } from "lucide-react";
 
 import { useAuth } from './hooks/useAuth';
 import { useSupabaseData } from './hooks/useSupabaseData';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import Auth from './components/Auth';
+import BarcodeScannerModal from './components/BarcodeScannerModal';
 
 // ── Global styles (fonts + animations) ──────────────────────
 const GlobalStyle = () => (
@@ -150,10 +151,10 @@ const GlobalStyle = () => (
       outline-offset: 2px;
     }
 
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-thumb { background: var(--ink-faint); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--ink-muted); }
+    /* Responsive Utilities */
+    @media (max-width: 480px) {
+      .mobile-hide { display: none !important; }
+    }
   `}</style>
 );
 
@@ -1472,8 +1473,20 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
   const [qty,   setQty]   = useState(1);
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+
+  const handleBarcodeFoodLog = async (foodItem, quantity, targetMeal) => {
+    const mealKey = (targetMeal || meal || 'snack').toLowerCase();
+    const mealEmoji = getMealEmoji(mealKey);
+    const res = await addCustomFoodLog({ ...foodItem, e: mealEmoji }, quantity, mealKey);
+    if (res?.error) {
+      showToast(`⚠️ Saved locally, cloud sync error: ${res.error.message || 'Check database'}`);
+    } else {
+      showToast(`${mealEmoji} Logged: ${foodItem.name} to ${mealKey}!`);
+    }
+  };
 
   const todayL = logs.filter(l => isToday(l.date || l.logged_at));
   const tCal   = todayL.reduce((a, l) => a + (l.food?.cal || 0) * (l.qty || 1), 0);
@@ -1714,28 +1727,59 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
 
       {/* Search + Controls */}
       <motion.div variants={itemVars} className="glass-card" style={{ padding: 20, marginBottom: 20 }}>
-        {/* Search bar */}
-        <div style={{ position: 'relative', marginBottom: 16 }}>
-          <Search size={18} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)' }} />
-          <input
-            value={sq}
-            onChange={e => setSq(e.target.value)}
-            placeholder="Search — chicken, paneer, 200ml milk..."
+        {/* Search bar + Barcode Scanner Trigger */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <Search size={18} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)' }} />
+            <input
+              value={sq}
+              onChange={e => setSq(e.target.value)}
+              placeholder="Search or enter food — chicken, paneer, milk..."
+              style={{
+                width: '100%', background: 'var(--bg-elevated)',
+                border: '1px solid var(--glass-border)', borderRadius: 12,
+                color: 'var(--ink-primary)', padding: '14px 44px',
+                fontFamily: 'inherit', fontSize: 14, fontWeight: 500,
+                outline: 'none', transition: 'border-color 0.2s',
+                boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+              }}
+            />
+            {sq && (
+              <button onClick={() => setSq('')}
+                style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--ink-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X size={18} />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowBarcodeScanner(true)}
+            title="Scan Barcode or QR Code"
             style={{
-              width: '100%', background: 'var(--bg-elevated)',
-              border: '1px solid var(--glass-border)', borderRadius: 12,
-              color: 'var(--ink-primary)', padding: '14px 44px',
-              fontFamily: 'inherit', fontSize: 14, fontWeight: 500,
-              outline: 'none', transition: 'border-color 0.2s',
-              boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+              height: 48,
+              padding: '0 14px',
+              borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(139, 92, 246, 0.18))',
+              border: '1px solid rgba(139, 92, 246, 0.35)',
+              color: 'var(--ink-primary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: 13,
+              flexShrink: 0,
+              boxShadow: '0 2px 6px rgba(139, 92, 246, 0.12)',
+              transition: 'transform 0.15s ease, box-shadow 0.15s ease'
             }}
-          />
-          {sq && (
-            <button onClick={() => setSq('')}
-              style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--ink-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <X size={18} />
-            </button>
-          )}
+            onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+            onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
+            <ScanBarcode size={18} color="#8b5cf6" />
+            <span style={{ fontWeight: 600, color: '#8b5cf6' }}>
+              <span className="mobile-hide">Scan </span>Barcode
+            </span>
+          </button>
         </div>
 
         {/* Meal type tabs (Shared Layout Animation!) */}
@@ -2041,6 +2085,17 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
           </AnimatePresence>
         )}
       </motion.div>
+
+      {/* Barcode & QR Scanner Modal */}
+      <BarcodeScannerModal
+        isOpen={showBarcodeScanner}
+        onClose={() => setShowBarcodeScanner(false)}
+        defaultMeal={meal}
+        onLogFood={handleBarcodeFoodLog}
+        onAskAIWithText={(text) => {
+          if (text) setSq(text);
+        }}
+      />
     </motion.div>
   );
 };
