@@ -203,15 +203,15 @@ export default function BarcodeScannerModal({
   const captureCurrentCameraFrame = () => {
     const container = document.getElementById(containerId);
     const video = container ? container.querySelector('video') : null;
-    if (!video) {
-      throw new Error('Camera feed not ready.');
+    if (!video || !video.videoWidth || video.videoWidth === 0) {
+      throw new Error('Camera feed is still warming up. Please wait 1 second and tap Snap again.');
     }
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.88);
+    return canvas.toDataURL('image/jpeg', 0.92);
   };
 
   // Analyze nutrition label photo with OCR + Groq AI
@@ -253,6 +253,7 @@ export default function BarcodeScannerModal({
     } catch (err) {
       console.error('Label scan error:', err);
       setCameraError(err.message || 'Failed to extract nutrition facts. Please try closer with good lighting.');
+      startScanner();
     } finally {
       setLoading(false);
     }
@@ -806,7 +807,7 @@ export default function BarcodeScannerModal({
                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 16, lineHeight: 1.4 }}>
                         {cameraError}
                       </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                         <button
                           type="button"
                           onClick={startScanner}
@@ -821,6 +822,18 @@ export default function BarcodeScannerModal({
                             className="btn-primary"
                             style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                             <UploadCloud size={14} /> Upload Photo
+                          </button>
+                        )}
+                        {onAskAIWithText && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onAskAIWithText('');
+                            }}
+                            className="btn-secondary"
+                            style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <Sparkles size={14} /> Type Food Name
                           </button>
                         )}
                       </div>
