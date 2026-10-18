@@ -199,29 +199,72 @@ export default function BarcodeScannerModal({
     }
   };
 
-  // Capture frame from active camera stream
+  // Resize large images (e.g. 12MP/48MP phone captures) to 1280px max for sub-second uploads
+  const resizeImageToMaxDimension = (imgSrc, maxDim = 1280, quality = 0.85) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(imgSrc);
+      img.src = imgSrc;
+    });
+  };
+
+  // Capture frame from active camera stream with auto-scaling for fast AI transmission
   const captureCurrentCameraFrame = () => {
     const container = document.getElementById(containerId);
     const video = container ? container.querySelector('video') : null;
     if (!video || !video.videoWidth || video.videoWidth === 0) {
       throw new Error('Camera feed is still warming up. Please wait 1 second and tap Snap again.');
     }
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+    const maxDim = 1280;
+    if (width > maxDim || height > maxDim) {
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.92);
+    ctx.drawImage(video, 0, 0, width, height);
+    return canvas.toDataURL('image/jpeg', 0.85);
   };
 
-  // Analyze nutrition label photo with OCR + Groq AI
+  // Analyze nutrition label photo with Gemini Multimodal Vision AI
   const handleAnalyzeLabel = async (imageDataUrl, hint = '') => {
     setLoading(true);
-    setLoadingMsg('Reading nutrition table (FSSAI/FDA) with OCR & Groq AI...');
+    setLoadingMsg('Analyzing nutrition table with Gemini Vision AI...');
     setCameraError(null);
     setScannedProduct(null);
     setNotFoundBarcode(null);
     triggerScanFeedback();
+
+    const progressTimer = setTimeout(() => {
+      setLoadingMsg('Extracting calories, protein, carbs & serving sizes...');
+    }, 2200);
 
     if (scannerRef.current && scannerRef.current.isScanning) {
       try {
@@ -255,6 +298,7 @@ export default function BarcodeScannerModal({
       setCameraError(err.message || 'Failed to extract nutrition facts. Please try closer with good lighting.');
       startScanner();
     } finally {
+      clearTimeout(progressTimer);
       setLoading(false);
     }
   };
@@ -274,10 +318,18 @@ export default function BarcodeScannerModal({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
-      handleAnalyzeLabel(event.target.result);
+    reader.onload = async (event) => {
+      setLoading(true);
+      setLoadingMsg('Optimizing photo for Gemini AI...');
+      try {
+        const resized = await resizeImageToMaxDimension(event.target.result, 1280, 0.85);
+        handleAnalyzeLabel(resized);
+      } catch (_) {
+        handleAnalyzeLabel(event.target.result);
+      }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   // Initialize camera scanner
@@ -538,7 +590,7 @@ export default function BarcodeScannerModal({
                   {activeTab === 'label' ? 'Snap Nutrition Label' : 'Barcode & QR Scanner'}
                 </h3>
                 <span style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-                  {activeTab === 'label' ? 'OCR & AI extraction for FSSAI / FDA tables' : 'Instant lookup from Open Food Facts'}
+                  {activeTab === 'label' ? 'Gemini Vision AI for FSSAI / FDA tables' : 'Instant lookup from Open Food Facts'}
                 </span>
               </div>
             </div>

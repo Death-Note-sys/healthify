@@ -249,18 +249,22 @@ export async function scanNutritionLabel(req, res) {
   }
 
   try {
+    const mimeMatch = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-    // ── 1. If Gemini API key is available, try Gemini Multimodal Vision (~1s) ──
+    // ── 1. If Gemini API key is available, try Gemini Multimodal Vision (~1.5s) ──
     if (geminiApiKey) {
       try {
         console.log('[Label Scanner] Querying Gemini Vision model...');
         const geminiPrompt = `You are a clinical nutrition extraction system.
 Analyze this photo of a food package's nutrition facts / FSSAI table.
 User product hint: "${productHint || 'None'}".
+Determine if a nutrition facts / FSSAI / nutritional information table is visible.
 Extract the product title, brand, serving size, and all nutritional values per 100g and/or per serving.
 Return a STRICT JSON object in this exact format:
 {
+  "tableDetected": true,
   "productName": "Product Name",
   "brand": "Brand name",
   "servingLabel": "e.g. 1 pack (40g) or 30g",
@@ -269,60 +273,90 @@ Return a STRICT JSON object in this exact format:
   "perServing": { "cal": 180, "protein": 3.4, "carbs": 24.8, "fat": 7.2 },
   "micronutrients": { "sodium": 320, "iron": 0, "calcium": 0, "vitD": 0, "vitB12": 0 }
 }
-Calculate perServing from per100g and servingGrams if missing. Return ONLY JSON.`;
+If no nutrition table or numbers are visible in the photo, set "tableDetected": false and values to null.
+Calculate perServing from per100g and servingGrams if perServing is not explicitly printed. Return ONLY valid JSON.`;
 
-        let gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiApiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(6000),
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: geminiPrompt },
-                { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-              ]
-            }],
-            generationConfig: { response_mime_type: 'application/json' }
-          })
-        });
+        const requestPayload = {
+          contents: [{
+            parts: [
+              { text: geminiPrompt },
+              { inline_data: { mime_type: mimeType, data: base64Data } }
+            ]
+          }],
+          generationConfig: {
+            response_mime_type: 'application/json',
+            thinking_config: { thinking_budget: 0 }
+          }
+        };
 
-        if (!gRes.ok) {
-          gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(6000),
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  { text: geminiPrompt },
-                  { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-                ]
-              }],
-              generationConfig: { response_mime_type: 'application/json' }
-            })
-          });
+        const GEMINI_MODELS = [
+          'gemini-3.5-flash',
+          'gemini-3.6-flash',
+          'gemini-3.7-flash',
+          'gemini-3.8-flash',
+          'gemini-3.1-flash-lite',
+          'gemini-flash-latest'
+        ];
+
+        let gRes = null;
+        let successfulModel = '';
+
+        for (const modelName of GEMINI_MODELS) {
+          try {
+            console.log(`[Label Scanner] Trying Gemini model: ${modelName}...`);
+            const resAttempt = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: AbortSignal.timeout(12000),
+              body: JSON.stringify(requestPayload)
+            });
+
+            if (resAttempt.ok) {
+              gRes = resAttempt;
+              successfulModel = modelName;
+              break;
+            } else if (resAttempt.status === 429) {
+              console.warn(`[Label Scanner] ${modelName} hit rate limit / quota, trying next model in pool...`);
+            } else {
+              const errJson = await resAttempt.json().catch(() => ({}));
+              console.warn(`[Label Scanner] ${modelName} returned status ${resAttempt.status}:`, errJson.error?.message || '');
+            }
+          } catch (modelErr) {
+            console.warn(`[Label Scanner] ${modelName} attempt error:`, modelErr.message);
+          }
         }
 
-        if (gRes.ok) {
+        if (gRes && gRes.ok) {
           const gData = await gRes.json();
           let rawContent = gData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-          rawContent = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim();
-          const parsed = JSON.parse(rawContent);
+          const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+          const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawContent);
+
+          const p100 = parsed.per100g || {};
+          const pServ = parsed.perServing || {};
+          const hasCalories = (p100.cal != null && Number(p100.cal) > 0) || (pServ.cal != null && Number(pServ.cal) > 0);
+          const hasMacros = (p100.protein != null || pServ.protein != null || p100.carbs != null || pServ.carbs != null);
+
+          if (parsed.tableDetected === false || (!hasCalories && !hasMacros && !parsed.productName)) {
+            return res.json({
+              found: false,
+              error: 'Could not detect a clear nutrition table in this photo. Please hold your phone steady, focus on the "Nutrition Information" panel with good lighting, and tap Snap again.'
+            });
+          }
 
           const name = parsed.productName || productHint || 'Scanned Nutrition Item';
           const brand = parsed.brand || '';
           const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
-          const p100 = parsed.per100g || {};
-          const pServ = parsed.perServing || {};
           const micros = parsed.micronutrients || {};
 
+          console.log(`[Label Scanner] ✓ Gemini Vision (${successfulModel}) extracted: ${fullName} (${pServ.cal || p100.cal || 0} kcal)`);
           return res.json({
             found: true,
             name: fullName,
             rawName: name,
             brand,
             isLabelScan: true,
-            servingLabel: parsed.servingLabel || '100g',
+            servingLabel: parsed.servingLabel || (parsed.servingGrams ? `${parsed.servingGrams}g` : '100g'),
             servingGrams: Number(parsed.servingGrams) || 100,
             per100g: {
               cal: Math.round(Number(p100.cal) || 0),
@@ -354,8 +388,15 @@ Calculate perServing from per100g and servingGrams if missing. Return ONLY JSON.
       }
     }
 
-    // ── 2. Fast Persistent Tesseract OCR + Groq LLM Parsing ──
-    console.log('[Label Scanner] Processing snapshot with persistent Tesseract worker...');
+    // ── 2. Fast Persistent Tesseract OCR + Groq LLM Parsing Fallback ──
+    if (!groqApiKey) {
+      return res.status(500).json({
+        found: false,
+        error: 'Vision processing failed and GROQ_API_KEY is not configured for OCR fallback.'
+      });
+    }
+
+    console.log('[Label Scanner] Processing snapshot with persistent Tesseract worker fallback...');
     const startTime = Date.now();
     const buffer = Buffer.from(base64Data, 'base64');
 
@@ -432,7 +473,7 @@ Return ONLY valid JSON.`;
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${groqApiKey}`
       },
       body: JSON.stringify({
         model: 'openai/gpt-oss-120b',
@@ -449,7 +490,8 @@ Return ONLY valid JSON.`;
 
     const groqJson = await groqRes.json();
     const rawContent = groqJson.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(rawContent);
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawContent);
 
     const name = parsed.productName || productHint || 'Scanned Nutrition Item';
     const brand = parsed.brand || '';
