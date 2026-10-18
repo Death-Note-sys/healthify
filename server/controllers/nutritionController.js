@@ -253,14 +253,18 @@ export async function scanNutritionLabel(req, res) {
     if (geminiApiKey) {
       try {
         console.log('[Label Scanner] Querying Gemini Vision model...');
-        const geminiPrompt = `You are a clinical nutrition extraction system.
-Analyze this photo of a food package's nutrition facts / FSSAI table.
+        const geminiPrompt = `You are an expert AI clinical nutrition and food packaging recognition system.
+Analyze this photo of a food product or package (front, back, side, or nutrition facts / FSSAI table).
 User product hint: "${productHint || 'None'}".
-Determine if a nutrition facts / FSSAI / nutritional information table is visible.
-Extract the product title, brand, serving size, and all nutritional values per 100g and/or per serving.
+
+Instructions:
+1. If a nutrition facts / FSSAI table is visible, extract the exact values printed.
+2. If the nutrition table is angled, partially cut off, or if this photo shows the front/branding of an identifiable food item, identify the product name and brand, and provide its standard authentic nutritional values (per 100g and per serving) so the user can log it seamlessly.
+3. Only set "foodIdentified": false if the photo is completely blank, black, or unrelated to food.
+
 Return a STRICT JSON object in this exact format:
 {
-  "tableDetected": true,
+  "foodIdentified": true,
   "productName": "Product Name",
   "brand": "Brand name",
   "servingLabel": "e.g. 1 pack (40g) or 30g",
@@ -269,8 +273,7 @@ Return a STRICT JSON object in this exact format:
   "perServing": { "cal": 180, "protein": 3.4, "carbs": 24.8, "fat": 7.2 },
   "micronutrients": { "sodium": 320, "iron": 0, "calcium": 0, "vitD": 0, "vitB12": 0 }
 }
-If no nutrition table or numbers are visible in the photo, set "tableDetected": false and values to null.
-Calculate perServing from per100g and servingGrams if perServing is not explicitly printed. Return ONLY valid JSON.`;
+Return ONLY valid JSON.`;
 
         const requestPayload = {
           contents: [{
@@ -333,10 +336,10 @@ Calculate perServing from per100g and servingGrams if perServing is not explicit
           const hasCalories = (p100.cal != null && Number(p100.cal) > 0) || (pServ.cal != null && Number(pServ.cal) > 0);
           const hasMacros = (p100.protein != null || pServ.protein != null || p100.carbs != null || pServ.carbs != null);
 
-          if (parsed.tableDetected === false || (!hasCalories && !hasMacros && !parsed.productName)) {
+          if (parsed.foodIdentified === false || (!hasCalories && !hasMacros && !parsed.productName)) {
             return res.json({
               found: false,
-              error: 'Could not detect a clear nutrition table in this photo. Please hold your phone steady, focus on the "Nutrition Information" panel with good lighting, and tap Snap again.'
+              error: 'Could not detect clear food packaging in this photo. Please hold steady with good lighting and tap Snap again.'
             });
           }
 
