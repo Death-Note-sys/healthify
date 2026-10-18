@@ -1422,21 +1422,36 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
                 </div>
                 {items.map(l => (
                   <motion.div layout key={l.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, scale: 0.95 }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
-                        {l.food?.e && l.food?.e !== '✨' ? l.food.e : getMealEmoji(l.mealType || m)}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1, paddingRight: 8 }}>
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <div style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
+                          {l.food?.e && l.food?.e !== '✨' ? l.food.e : getMealEmoji(l.mealType || m)}
+                        </div>
+                        {l.food?.unit === 'custom' && (
+                          <span
+                            title="AI Saved Food"
+                            style={{
+                              position: 'absolute', bottom: -2, right: -2,
+                              background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                              color: '#fff', fontSize: 7, fontWeight: 800,
+                              padding: '1px 3px', borderRadius: 3, lineHeight: 1,
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                            }}>
+                            AI
+                          </span>
+                        )}
                       </div>
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)' }}>{l.food.name}</div>
-                        <div style={{ fontSize: 12, color: 'var(--ink-muted)' }}>{l.qty}× {l.food.s}</div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.food.name}>{l.food.name}</div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.qty}× {l.food.s || 'custom'}</div>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
                       <div style={{ textAlign: 'right' }}>
                         <div className="mono-num" style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-primary)' }}>{Math.round(l.food.cal * l.qty)} kcal</div>
                         <div className="mono-num" style={{ fontSize: 12, color: 'var(--accent-blue)', fontWeight: 500 }}>{Math.round(l.food.protein * l.qty)}g Pro</div>
                       </div>
-                      <button onClick={() => delLog(l.id)} style={{ color: 'var(--ink-muted)', background: 'transparent', border: 'none', padding: 4, borderRadius: 6 }}>
+                      <button onClick={() => delLog(l.id)} style={{ color: 'var(--ink-muted)', background: 'transparent', border: 'none', padding: 4, borderRadius: 6, cursor: 'pointer' }}>
                         <X size={16} />
                       </button>
                     </div>
@@ -1790,19 +1805,41 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                         overflow: 'hidden'
                       }}>
                       <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0, flex: 1 }}>
-                        <span style={{ fontSize: 18, background: 'var(--bg-surface)', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, flexShrink: 0, boxShadow: 'var(--shadow-sm)' }}>
-                          {item.food?.e && item.food?.e !== '✨' ? item.food.e : getMealEmoji(item.lastMeal)}
-                        </span>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink-primary)', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.food.name}</span>
-                            {item.isCustom && (
-                              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--ink-secondary)', background: 'var(--bg-surface)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
-                                AI Saved
-                              </span>
-                            )}
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <span style={{ fontSize: 18, background: 'var(--bg-surface)', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, boxShadow: 'var(--shadow-sm)' }}>
+                            {item.food?.e && item.food?.e !== '✨' ? item.food.e : getMealEmoji(item.lastMeal)}
+                          </span>
+                          {item.isCustom && (
+                            <span
+                              title="AI Saved Food"
+                              style={{
+                                position: 'absolute', bottom: -2, right: -2,
+                                background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                                color: '#fff', fontSize: 8, fontWeight: 800,
+                                padding: '1px 3.5px', borderRadius: 4,
+                                lineHeight: 1, boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                              }}>
+                              AI
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1, paddingRight: 4 }}>
+                          <div
+                            title={item.food.name}
+                            style={{
+                              fontWeight: 600,
+                              fontSize: 13,
+                              color: 'var(--ink-primary)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              minWidth: 0,
+                              display: 'block',
+                              lineHeight: 1.3
+                            }}>
+                            {item.food.name}
                           </div>
-                          <div className="mono-num" style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2 }}>
+                          <div className="mono-num" style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             <strong style={{ color: 'var(--ink-primary)' }}>{totalItemCal} kcal</strong> ·{' '}
                             <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{totalItemProt}g P</span> ·{' '}
                             <span style={{ color: 'var(--accent-green)' }}>{totalItemCarb}g C</span> ·{' '}
@@ -1811,17 +1848,17 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
                         <button
                           type="button"
                           onClick={() => handleReLog(item)}
                           className="btn-secondary"
                           style={{
-                            padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                            padding: '6px 10px', fontSize: 11, fontWeight: 600, borderRadius: 8,
                             display: 'inline-flex', alignItems: 'center', gap: 4,
-                            textTransform: 'capitalize'
+                            textTransform: 'capitalize', whiteSpace: 'nowrap'
                           }}>
-                          <Repeat size={13} /> + {meal}
+                          <Repeat size={12} /> + {meal}
                         </button>
 
                         <button
@@ -1829,11 +1866,11 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                           onClick={(e) => handleDismissReLog(item.food.name, e)}
                           title="Remove from quick re-log"
                           style={{
-                            width: 28, height: 28, borderRadius: 8,
+                            width: 26, height: 26, borderRadius: 8,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             background: 'transparent', border: '1px solid transparent',
                             color: 'var(--ink-muted)', cursor: 'pointer',
-                            transition: 'all 0.15s ease',
+                            transition: 'all 0.15s ease', flexShrink: 0
                           }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.color = 'var(--accent-red)';
@@ -1955,21 +1992,36 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                   <AnimatePresence mode="popLayout">
                     {items.map(l => (
                       <motion.div layout initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, scale: 0.95 }} key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--glass-border)' }}>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                          <span style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
-                            {l.food?.e && l.food?.e !== '✨' ? l.food.e : getMealEmoji(l.mealType || m)}
-                          </span>
-                          <div>
-                            <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)' }}>{l.food.name}</div>
-                            <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-                              {l.qty}× {l.food.s} &nbsp;·&nbsp;
-                              <span style={{ color: 'var(--accent-blue)' }}>{Math.round(l.food.protein * l.qty)}g P</span> ·{' '}
-                              <span style={{ color: 'var(--accent-green)' }}>{Math.round(l.food.carbs * l.qty)}g C</span> ·{' '}
-                              <span style={{ color: 'var(--accent-amber)' }}>{Math.round(l.food.fat * l.qty)}g F</span>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0, flex: 1, paddingRight: 8 }}>
+                          <div style={{ position: 'relative', flexShrink: 0 }}>
+                            <span style={{ fontSize: 20, background: 'var(--bg-elevated)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10 }}>
+                              {l.food?.e && l.food?.e !== '✨' ? l.food.e : getMealEmoji(l.mealType || m)}
+                            </span>
+                            {l.food?.unit === 'custom' && (
+                              <span
+                                title="AI Saved Food"
+                                style={{
+                                  position: 'absolute', bottom: -2, right: -2,
+                                  background: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+                                  color: '#fff', fontSize: 7, fontWeight: 800,
+                                  padding: '1px 3px', borderRadius: 3, lineHeight: 1,
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                                }}>
+                                AI
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.food.name}>{l.food.name}</div>
+                            <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {l.qty}× {l.food.s || 'custom'} &nbsp;·&nbsp;
+                              <span style={{ color: 'var(--accent-blue)' }}>{Math.round((l.food.protein || 0) * l.qty)}g P</span> ·{' '}
+                              <span style={{ color: 'var(--accent-green)' }}>{Math.round((l.food.carbs || 0) * l.qty)}g C</span> ·{' '}
+                              <span style={{ color: 'var(--accent-amber)' }}>{Math.round((l.food.fat || 0) * l.qty)}g F</span>
                             </div>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
                           <div style={{ textAlign: 'right' }}>
                             <div className="mono-num" style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-primary)' }}>{Math.round(l.food.cal * l.qty)}</div>
                             <div style={{ fontSize: 11, color: 'var(--ink-muted)', fontWeight: 500 }}>kcal</div>
