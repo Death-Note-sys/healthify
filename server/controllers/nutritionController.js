@@ -201,6 +201,17 @@ export async function getFoodByBarcode(req, res) {
   }
 }
 
+function isValidImageBuffer(buf) {
+  if (!buf || buf.length < 32) return false;
+  // JPEG
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+  // PNG
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+  // WebP
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return true;
+  return false;
+}
+
 // ── Persistent OCR Worker Singleton (initializes once, reuses in ~400ms) ──
 let ocrWorkerPromise = null;
 async function getOcrWorker() {
@@ -209,7 +220,10 @@ async function getOcrWorker() {
       const { createWorker } = await import('tesseract.js');
       const worker = await createWorker('eng');
       return worker;
-    })();
+    })().catch(err => {
+      ocrWorkerPromise = null;
+      throw err;
+    });
   }
   return ocrWorkerPromise;
 }
@@ -237,10 +251,11 @@ export async function scanNutritionLabel(req, res) {
   try {
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-    // ── 1. If Gemini API key is available, use Gemini 1.5 Flash Vision (ultra fast ~1s, flawless accuracy) ──
+    // ── 1. If Gemini API key is available, try Gemini Multimodal Vision (~1s) ──
     if (geminiApiKey) {
-      console.log('[Label Scanner] Using Gemini 1.5 Flash Vision...');
-      const geminiPrompt = `You are a clinical nutrition extraction system.
+      try {
+        console.log('[Label Scanner] Querying Gemini Vision model...');
+        const geminiPrompt = `You are a clinical nutrition extraction system.
 Analyze this photo of a food package's nutrition facts / FSSAI table.
 User product hint: "${productHint || 'None'}".
 Extract the product title, brand, serving size, and all nutritional values per 100g and/or per serving.
@@ -256,61 +271,86 @@ Return a STRICT JSON object in this exact format:
 }
 Calculate perServing from per100g and servingGrams if missing. Return ONLY JSON.`;
 
-      const gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: geminiPrompt },
-              { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-            ]
-          }],
-          generationConfig: { response_mime_type: 'application/json' }
-        })
-      });
-
-      if (gRes.ok) {
-        const gData = await gRes.json();
-        const rawContent = gData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-        const parsed = JSON.parse(rawContent);
-
-        const name = parsed.productName || productHint || 'Scanned Nutrition Item';
-        const brand = parsed.brand || '';
-        const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
-        const p100 = parsed.per100g || {};
-        const pServ = parsed.perServing || {};
-        const micros = parsed.micronutrients || {};
-
-        return res.json({
-          found: true,
-          name: fullName,
-          rawName: name,
-          brand,
-          isLabelScan: true,
-          servingLabel: parsed.servingLabel || '100g',
-          servingGrams: Number(parsed.servingGrams) || 100,
-          per100g: {
-            cal: Math.round(Number(p100.cal) || 0),
-            protein: Math.round((Number(p100.protein) || 0) * 10) / 10,
-            carbs: Math.round((Number(p100.carbs) || 0) * 10) / 10,
-            fat: Math.round((Number(p100.fat) || 0) * 10) / 10,
-            fiber: Math.round((Number(p100.fiber) || 0) * 10) / 10,
-          },
-          perServing: {
-            cal: Math.round(Number(pServ.cal || p100.cal || 0)),
-            protein: Math.round((Number(pServ.protein || p100.protein || 0)) * 10) / 10,
-            carbs: Math.round((Number(pServ.carbs || p100.carbs || 0)) * 10) / 10,
-            fat: Math.round((Number(pServ.fat || p100.fat || 0)) * 10) / 10,
-          },
-          micronutrients: {
-            sodium: Math.round(Number(micros.sodium || 0)),
-            iron: Math.round(Number(micros.iron || 0) * 10) / 10,
-            calcium: Math.round(Number(micros.calcium || 0) * 10) / 10,
-            vitD: Number(micros.vitD || 0),
-            vitB12: Number(micros.vitB12 || 0)
-          }
+        let gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiApiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(6000),
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: geminiPrompt },
+                { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+              ]
+            }],
+            generationConfig: { response_mime_type: 'application/json' }
+          })
         });
+
+        if (!gRes.ok) {
+          gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(6000),
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: geminiPrompt },
+                  { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                ]
+              }],
+              generationConfig: { response_mime_type: 'application/json' }
+            })
+          });
+        }
+
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          let rawContent = gData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+          rawContent = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim();
+          const parsed = JSON.parse(rawContent);
+
+          const name = parsed.productName || productHint || 'Scanned Nutrition Item';
+          const brand = parsed.brand || '';
+          const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
+          const p100 = parsed.per100g || {};
+          const pServ = parsed.perServing || {};
+          const micros = parsed.micronutrients || {};
+
+          return res.json({
+            found: true,
+            name: fullName,
+            rawName: name,
+            brand,
+            isLabelScan: true,
+            servingLabel: parsed.servingLabel || '100g',
+            servingGrams: Number(parsed.servingGrams) || 100,
+            per100g: {
+              cal: Math.round(Number(p100.cal) || 0),
+              protein: Math.round((Number(p100.protein) || 0) * 10) / 10,
+              carbs: Math.round((Number(p100.carbs) || 0) * 10) / 10,
+              fat: Math.round((Number(p100.fat) || 0) * 10) / 10,
+              fiber: Math.round((Number(p100.fiber) || 0) * 10) / 10,
+            },
+            perServing: {
+              cal: Math.round(Number(pServ.cal || p100.cal || 0)),
+              protein: Math.round((Number(pServ.protein || p100.protein || 0)) * 10) / 10,
+              carbs: Math.round((Number(pServ.carbs || p100.carbs || 0)) * 10) / 10,
+              fat: Math.round((Number(pServ.fat || p100.fat || 0)) * 10) / 10,
+            },
+            micronutrients: {
+              sodium: Math.round(Number(micros.sodium || 0)),
+              iron: Math.round(Number(micros.iron || 0) * 10) / 10,
+              calcium: Math.round(Number(micros.calcium || 0) * 10) / 10,
+              vitD: Number(micros.vitD || 0),
+              vitB12: Number(micros.vitB12 || 0)
+            }
+          });
+        } else {
+          const errData = await gRes.json().catch(() => ({}));
+          console.warn('[Label Scanner] Gemini Vision error:', errData.error?.message || gRes.status);
+        }
+      } catch (geminiErr) {
+        console.warn('[Label Scanner] Gemini Vision failed or timed out, falling back to OCR + Groq:', geminiErr.message);
       }
     }
 
@@ -319,9 +359,22 @@ Calculate perServing from per100g and servingGrams if missing. Return ONLY JSON.
     const startTime = Date.now();
     const buffer = Buffer.from(base64Data, 'base64');
 
-    const worker = await getOcrWorker();
-    const ret = await worker.recognize(buffer);
-    const ocrText = ret.data?.text?.trim() || '';
+    if (!isValidImageBuffer(buffer)) {
+      return res.status(400).json({
+        found: false,
+        error: 'Invalid or incomplete image captured. Please hold your phone steady and tap Snap again.'
+      });
+    }
+
+    let ocrText = '';
+    try {
+      const worker = await getOcrWorker();
+      const ret = await worker.recognize(buffer);
+      ocrText = ret.data?.text?.trim() || '';
+    } catch (ocrErr) {
+      console.warn('[Label Scanner] OCR processing error:', ocrErr.message);
+      ocrWorkerPromise = null;
+    }
     const ocrDuration = Date.now() - startTime;
     console.log(`[Label Scanner] OCR extracted ${ocrText.length} characters in ${ocrDuration}ms.`);
 
