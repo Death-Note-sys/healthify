@@ -16,7 +16,10 @@ import {
   ScanBarcode,
   Layers,
   ChevronRight,
-  Info
+  Info,
+  FileText,
+  UploadCloud,
+  ImageIcon
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
@@ -92,11 +95,13 @@ export default function BarcodeScannerModal({
   defaultMeal = 'lunch',
   onAskAIWithText
 }) {
+  const [activeTab, setActiveTab] = useState('barcode'); // 'barcode' | 'label'
   const [scannerActive, setScannerActive] = useState(false);
   const [cameraError, setCameraError] = useState(null);
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('Fetching product nutrition...');
   const [scannedProduct, setScannedProduct] = useState(null);
   const [notFoundBarcode, setNotFoundBarcode] = useState(null);
   const [manualInput, setManualInput] = useState('');
@@ -109,6 +114,7 @@ export default function BarcodeScannerModal({
   const [isLogged, setIsLogged] = useState(false);
 
   const scannerRef = useRef(null);
+  const fileInputRef = useRef(null);
   const containerId = 'healthify-barcode-reader';
 
   // Haptic feedback + subtle audio beep
@@ -136,12 +142,12 @@ export default function BarcodeScannerModal({
     if (!barcode) return;
     const cleanCode = String(barcode).trim();
     setLoading(true);
+    setLoadingMsg('Fetching product nutrition from Open Food Facts...');
     setCameraError(null);
     setScannedProduct(null);
     setNotFoundBarcode(null);
     triggerScanFeedback();
 
-    // Pause / stop scanner while showing result
     if (scannerRef.current && scannerRef.current.isScanning) {
       try {
         await scannerRef.current.stop();
@@ -151,7 +157,6 @@ export default function BarcodeScannerModal({
     }
 
     try {
-      // 1. Try local Express API first
       let data = null;
       try {
         const res = await fetch(`/api/nutrition/barcode/${cleanCode}`);
@@ -162,7 +167,6 @@ export default function BarcodeScannerModal({
         console.warn('Local barcode API unreachable, trying direct Open Food Facts...', e);
       }
 
-      // 2. Fallback to direct Open Food Facts fetch (for client-only PWA deployments)
       if (!data || !data.found) {
         try {
           const directRes = await fetch(`https://world.openfoodfacts.org/api/v2/product/${cleanCode}.json`, {
@@ -195,6 +199,86 @@ export default function BarcodeScannerModal({
     }
   };
 
+  // Capture frame from active camera stream
+  const captureCurrentCameraFrame = () => {
+    const container = document.getElementById(containerId);
+    const video = container ? container.querySelector('video') : null;
+    if (!video) {
+      throw new Error('Camera feed not ready.');
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.88);
+  };
+
+  // Analyze nutrition label photo with OCR + Groq AI
+  const handleAnalyzeLabel = async (imageDataUrl, hint = '') => {
+    setLoading(true);
+    setLoadingMsg('Reading nutrition table (FSSAI/FDA) with OCR & Groq AI...');
+    setCameraError(null);
+    setScannedProduct(null);
+    setNotFoundBarcode(null);
+    triggerScanFeedback();
+
+    if (scannerRef.current && scannerRef.current.isScanning) {
+      try {
+        await scannerRef.current.stop();
+      } catch (err) {
+        console.warn('Scanner pause error:', err);
+      }
+    }
+
+    try {
+      const res = await fetch('/api/nutrition/scan-label', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: imageDataUrl,
+          productHint: hint || (notFoundBarcode ? `Barcode ${notFoundBarcode}` : '')
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.found) {
+        throw new Error(data.error || 'Could not parse clear nutrition facts from this image.');
+      }
+
+      setScannedProduct(data);
+      setServingMode(data.servingLabel && data.perServing?.cal ? 'serving' : '100g');
+      setMultiplier(1);
+      setIsLogged(false);
+    } catch (err) {
+      console.error('Label scan error:', err);
+      setCameraError(err.message || 'Failed to extract nutrition facts. Please try closer with good lighting.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle snap button click
+  const handleSnapLabelClick = () => {
+    try {
+      const frameData = captureCurrentCameraFrame();
+      handleAnalyzeLabel(frameData);
+    } catch (err) {
+      setCameraError(err.message || 'Could not capture photo from camera. Try uploading from gallery below.');
+    }
+  };
+
+  // Handle file upload
+  const handleImageFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      handleAnalyzeLabel(event.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Initialize camera scanner
   const startScanner = async () => {
     setCameraError(null);
@@ -222,6 +306,11 @@ export default function BarcodeScannerModal({
       const config = {
         fps: 15,
         qrbox: (viewfinderWidth, viewfinderHeight) => {
+          if (activeTab === 'label') {
+            const width = Math.min(viewfinderWidth * 0.9, 360);
+            const height = Math.min(viewfinderHeight * 0.75, 260);
+            return { width: Math.max(240, Math.floor(width)), height: Math.max(160, Math.floor(height)) };
+          }
           const width = Math.min(viewfinderWidth * 0.85, 320);
           const height = Math.min(viewfinderHeight * 0.45, 180);
           return { width: Math.max(220, Math.floor(width)), height: Math.max(130, Math.floor(height)) };
@@ -233,16 +322,15 @@ export default function BarcodeScannerModal({
         { facingMode: 'environment' },
         config,
         (decodedText) => {
-          handleBarcodeLookup(decodedText);
+          if (activeTab === 'barcode') {
+            handleBarcodeLookup(decodedText);
+          }
         },
-        () => {
-          // Frame scan error (expected on empty frames, ignore)
-        }
+        () => {}
       );
 
       setScannerActive(true);
 
-      // Check torch capability
       try {
         const capabilities = html5QrCode.getRunningTrackCapabilities();
         if (capabilities && capabilities.torch) {
@@ -255,7 +343,7 @@ export default function BarcodeScannerModal({
       if (err?.name === 'NotAllowedError' || String(err).includes('Permission denied')) {
         setCameraError('Camera access was denied. Please allow camera permissions in your browser settings.');
       } else if (err?.name === 'NotFoundError' || String(err).includes('device not found')) {
-        setCameraError('No camera found on this device. You can enter the barcode manually below.');
+        setCameraError('No camera found on this device. You can enter the barcode or upload a label photo below.');
       } else {
         setCameraError('Unable to access camera: ' + (err.message || 'Check browser permissions'));
       }
@@ -297,7 +385,6 @@ export default function BarcodeScannerModal({
   useEffect(() => {
     if (isOpen) {
       setSelectedMeal(defaultMeal);
-      // Wait for DOM element to mount
       const timer = setTimeout(() => {
         startScanner();
       }, 150);
@@ -311,6 +398,7 @@ export default function BarcodeScannerModal({
       setNotFoundBarcode(null);
       setCameraError(null);
       setManualInput('');
+      setActiveTab('barcode');
     }
   }, [isOpen]);
 
@@ -357,9 +445,9 @@ export default function BarcodeScannerModal({
       vitD: scannedProduct.micronutrients?.vitD || 0,
       vitB12: scannedProduct.micronutrients?.vitB12 || 0,
       s: nut.label,
-      unit: 'barcode',
-      barcode: scannedProduct.barcode,
-      image: scannedProduct.image,
+      unit: scannedProduct.isLabelScan ? 'custom' : 'barcode',
+      barcode: scannedProduct.barcode || null,
+      image: scannedProduct.image || null,
       e: '🏷️'
     };
 
@@ -408,7 +496,7 @@ export default function BarcodeScannerModal({
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
             overflow: 'hidden',
-            maxHeight: '92vh',
+            maxHeight: '94vh',
             display: 'flex',
             flexDirection: 'column',
             boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.4)',
@@ -418,7 +506,7 @@ export default function BarcodeScannerModal({
           {/* Header Bar */}
           <div
             style={{
-              padding: '16px 20px',
+              padding: '14px 18px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -431,21 +519,25 @@ export default function BarcodeScannerModal({
                   width: 36,
                   height: 36,
                   borderRadius: 10,
-                  background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  background: activeTab === 'label'
+                    ? 'linear-gradient(135deg, #10b981, #059669)'
+                    : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
                   color: '#fff',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 2px 8px rgba(99, 102, 241, 0.35)'
+                  boxShadow: activeTab === 'label'
+                    ? '0 2px 8px rgba(16, 185, 129, 0.35)'
+                    : '0 2px 8px rgba(99, 102, 241, 0.35)'
                 }}>
-                <ScanBarcode size={20} />
+                {activeTab === 'label' ? <FileText size={20} /> : <ScanBarcode size={20} />}
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--ink-primary)' }}>
-                  Barcode & QR Scanner
+                  {activeTab === 'label' ? 'Snap Nutrition Label' : 'Barcode & QR Scanner'}
                 </h3>
                 <span style={{ fontSize: 12, color: 'var(--ink-muted)' }}>
-                  Scan packaged foods for instant verified macros
+                  {activeTab === 'label' ? 'OCR & AI extraction for FSSAI / FDA tables' : 'Instant lookup from Open Food Facts'}
                 </span>
               </div>
             </div>
@@ -492,6 +584,61 @@ export default function BarcodeScannerModal({
             </div>
           </div>
 
+          {/* Mode Switcher Tabs */}
+          {!scannedProduct && (
+            <div style={{ padding: '8px 18px 0', background: 'var(--bg-elevated)', display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('barcode');
+                  setCameraError(null);
+                  setNotFoundBarcode(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '8px 10px',
+                  borderRadius: '10px 10px 0 0',
+                  border: 'none',
+                  borderBottom: activeTab === 'barcode' ? '2px solid #8b5cf6' : '2px solid transparent',
+                  background: activeTab === 'barcode' ? 'var(--bg-surface)' : 'transparent',
+                  color: activeTab === 'barcode' ? '#8b5cf6' : 'var(--ink-secondary)',
+                  fontWeight: 600,
+                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6
+                }}>
+                <Barcode size={14} /> 🏷️ Barcode Scan
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('label');
+                  setCameraError(null);
+                  setNotFoundBarcode(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '8px 10px',
+                  borderRadius: '10px 10px 0 0',
+                  border: 'none',
+                  borderBottom: activeTab === 'label' ? '2px solid #10b981' : '2px solid transparent',
+                  background: activeTab === 'label' ? 'var(--bg-surface)' : 'transparent',
+                  color: activeTab === 'label' ? '#10b981' : 'var(--ink-secondary)',
+                  fontWeight: 600,
+                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6
+                }}>
+                <FileText size={14} /> 📋 Snap Nutrition Table (FSSAI)
+              </button>
+            </div>
+          )}
+
           {/* Modal Body / Scrollable Area */}
           <div style={{ overflowY: 'auto', padding: '16px 20px', flex: 1 }}>
 
@@ -505,7 +652,7 @@ export default function BarcodeScannerModal({
                     borderRadius: 18,
                     overflow: 'hidden',
                     background: '#090a0f',
-                    minHeight: 280,
+                    minHeight: activeTab === 'label' ? 300 : 270,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -518,7 +665,7 @@ export default function BarcodeScannerModal({
                     id={containerId}
                     style={{
                       width: '100%',
-                      minHeight: 280,
+                      minHeight: activeTab === 'label' ? 300 : 270,
                       background: 'transparent'
                     }}
                   />
@@ -538,30 +685,49 @@ export default function BarcodeScannerModal({
                       {/* Reticle Target */}
                       <div
                         style={{
-                          width: '78%',
-                          maxWidth: 300,
-                          height: 150,
-                          border: '2px solid rgba(139, 92, 246, 0.45)',
+                          width: activeTab === 'label' ? '86%' : '78%',
+                          maxWidth: activeTab === 'label' ? 340 : 300,
+                          height: activeTab === 'label' ? 200 : 150,
+                          border: activeTab === 'label'
+                            ? '2px solid rgba(16, 185, 129, 0.45)'
+                            : '2px solid rgba(139, 92, 246, 0.45)',
                           borderRadius: 14,
                           position: 'relative',
-                          boxShadow: '0 0 0 4000px rgba(0, 0, 0, 0.45), 0 0 15px rgba(139, 92, 246, 0.25)',
+                          boxShadow: activeTab === 'label'
+                            ? '0 0 0 4000px rgba(0, 0, 0, 0.45), 0 0 15px rgba(16, 185, 129, 0.25)'
+                            : '0 0 0 4000px rgba(0, 0, 0, 0.45), 0 0 15px rgba(139, 92, 246, 0.25)',
                           overflow: 'hidden'
                         }}>
                         {/* Target Corner Brackets */}
-                        <div style={{ position: 'absolute', top: -1, left: -1, width: 18, height: 18, borderTop: '3px solid #8b5cf6', borderLeft: '3px solid #8b5cf6', borderTopLeftRadius: 10 }} />
-                        <div style={{ position: 'absolute', top: -1, right: -1, width: 18, height: 18, borderTop: '3px solid #8b5cf6', borderRight: '3px solid #8b5cf6', borderTopRightRadius: 10 }} />
-                        <div style={{ position: 'absolute', bottom: -1, left: -1, width: 18, height: 18, borderBottom: '3px solid #8b5cf6', borderLeft: '3px solid #8b5cf6', borderBottomLeftRadius: 10 }} />
-                        <div style={{ position: 'absolute', bottom: -1, right: -1, width: 18, height: 18, borderBottom: '3px solid #8b5cf6', borderRight: '3px solid #8b5cf6', borderBottomRightRadius: 10 }} />
+                        {activeTab === 'label' ? (
+                          <>
+                            <div style={{ position: 'absolute', top: -1, left: -1, width: 18, height: 18, borderTop: '3px solid #10b981', borderLeft: '3px solid #10b981', borderTopLeftRadius: 10 }} />
+                            <div style={{ position: 'absolute', top: -1, right: -1, width: 18, height: 18, borderTop: '3px solid #10b981', borderRight: '3px solid #10b981', borderTopRightRadius: 10 }} />
+                            <div style={{ position: 'absolute', bottom: -1, left: -1, width: 18, height: 18, borderBottom: '3px solid #10b981', borderLeft: '3px solid #10b981', borderBottomLeftRadius: 10 }} />
+                            <div style={{ position: 'absolute', bottom: -1, right: -1, width: 18, height: 18, borderBottom: '3px solid #10b981', borderRight: '3px solid #10b981', borderBottomRightRadius: 10 }} />
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ position: 'absolute', top: -1, left: -1, width: 18, height: 18, borderTop: '3px solid #8b5cf6', borderLeft: '3px solid #8b5cf6', borderTopLeftRadius: 10 }} />
+                            <div style={{ position: 'absolute', top: -1, right: -1, width: 18, height: 18, borderTop: '3px solid #8b5cf6', borderRight: '3px solid #8b5cf6', borderTopRightRadius: 10 }} />
+                            <div style={{ position: 'absolute', bottom: -1, left: -1, width: 18, height: 18, borderBottom: '3px solid #8b5cf6', borderLeft: '3px solid #8b5cf6', borderBottomLeftRadius: 10 }} />
+                            <div style={{ position: 'absolute', bottom: -1, right: -1, width: 18, height: 18, borderBottom: '3px solid #8b5cf6', borderRight: '3px solid #8b5cf6', borderBottomRightRadius: 10 }} />
+                          </>
+                        )}
 
                         {/* Animated Laser Scanning Line */}
                         <motion.div
-                          animate={{ y: [0, 148, 0] }}
+                          animate={{ y: activeTab === 'label' ? [0, 198, 0] : [0, 148, 0] }}
                           transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
                           style={{
                             width: '100%',
                             height: 2,
-                            background: 'linear-gradient(90deg, transparent, #8b5cf6, #ec4899, #8b5cf6, transparent)',
-                            boxShadow: '0 0 8px #a855f7, 0 0 16px #8b5cf6'
+                            background: activeTab === 'label'
+                              ? 'linear-gradient(90deg, transparent, #10b981, #34d399, #10b981, transparent)'
+                              : 'linear-gradient(90deg, transparent, #8b5cf6, #ec4899, #8b5cf6, transparent)',
+                            boxShadow: activeTab === 'label'
+                              ? '0 0 8px #10b981, 0 0 16px #34d399'
+                              : '0 0 8px #a855f7, 0 0 16px #8b5cf6'
                           }}
                         />
                       </div>
@@ -578,7 +744,9 @@ export default function BarcodeScannerModal({
                           letterSpacing: '0.02em',
                           border: '1px solid rgba(255,255,255,0.1)'
                         }}>
-                        Align barcode within the frame
+                        {activeTab === 'label'
+                          ? 'Align Nutrition Facts / FSSAI table in frame'
+                          : 'Align barcode within the frame'}
                       </div>
                     </div>
                   )}
@@ -589,25 +757,29 @@ export default function BarcodeScannerModal({
                       style={{
                         position: 'absolute',
                         inset: 0,
-                        background: 'rgba(0, 0, 0, 0.85)',
+                        background: 'rgba(0, 0, 0, 0.88)',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: 12,
-                        zIndex: 10
+                        zIndex: 10,
+                        padding: 20,
+                        textAlign: 'center'
                       }}>
                       <motion.div
                         animate={{ rotate: 360 }}
                         transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                        style={{ color: '#8b5cf6' }}>
+                        style={{ color: activeTab === 'label' ? '#10b981' : '#8b5cf6' }}>
                         <RefreshCw size={36} />
                       </motion.div>
                       <div style={{ color: '#fff', fontSize: 14, fontWeight: 600 }}>
-                        Fetching product nutrition...
+                        {loadingMsg}
                       </div>
                       <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>
-                        Querying Open Food Facts database
+                        {activeTab === 'label'
+                          ? 'Extracting energy, protein, carbs, & fat'
+                          : 'Querying Open Food Facts database'}
                       </div>
                     </div>
                   )}
@@ -629,86 +801,151 @@ export default function BarcodeScannerModal({
                       }}>
                       <AlertCircle size={40} color="var(--accent-red)" style={{ marginBottom: 12 }} />
                       <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 6 }}>
-                        Camera Notice
+                        Notice
                       </div>
                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 16, lineHeight: 1.4 }}>
                         {cameraError}
                       </div>
-                      <button
-                        type="button"
-                        onClick={startScanner}
-                        className="btn-secondary"
-                        style={{ padding: '8px 16px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <RefreshCw size={14} /> Try Camera Again
-                      </button>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={startScanner}
+                          className="btn-secondary"
+                          style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <RefreshCw size={14} /> Try Camera Again
+                        </button>
+                        {activeTab === 'label' && (
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="btn-primary"
+                            style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <UploadCloud size={14} /> Upload Photo
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* Manual Barcode Input Fallback Drawer */}
-                <div style={{ marginTop: 16 }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowManual(!showManual)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--ink-secondary)',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      margin: '0 auto',
-                      padding: 4
-                    }}>
-                    <Barcode size={15} />
-                    {showManual ? 'Hide manual entry' : 'Trouble scanning? Enter barcode digits manually'}
-                  </button>
+                {/* Shutter Button & Upload for Nutrition Label Mode */}
+                {activeTab === 'label' && (
+                  <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={handleSnapLabelClick}
+                      disabled={loading || !scannerActive}
+                      className="btn-primary"
+                      style={{
+                        flex: 2,
+                        padding: '12px 16px',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        background: 'linear-gradient(135deg, #10b981, #059669)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                      }}>
+                      <Camera size={18} /> Snap & Analyze Table
+                    </button>
 
-                  {showManual && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      style={{ marginTop: 10 }}>
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (manualInput.trim()) {
-                            handleBarcodeLookup(manualInput.trim());
-                          }
-                        }}
-                        style={{ display: 'flex', gap: 8 }}>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          placeholder="e.g. 3017620422003 (UPC/EAN)"
-                          value={manualInput}
-                          onChange={(e) => setManualInput(e.target.value.replace(/[^0-9]/g, ''))}
-                          style={{
-                            flex: 1,
-                            padding: '10px 14px',
-                            borderRadius: 10,
-                            border: '1px solid var(--glass-border)',
-                            background: 'var(--bg-elevated)',
-                            color: 'var(--ink-primary)',
-                            fontSize: 13,
-                            fontFamily: 'inherit'
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading}
+                      className="btn-secondary"
+                      title="Upload photo from phone gallery"
+                      style={{
+                        flex: 1,
+                        padding: '12px 14px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6
+                      }}>
+                      <UploadCloud size={16} /> Gallery
+                    </button>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={handleImageFileChange}
+                    />
+                  </div>
+                )}
+
+                {/* Manual Barcode Input Fallback Drawer for Barcode Mode */}
+                {activeTab === 'barcode' && (
+                  <div style={{ marginTop: 16 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowManual(!showManual)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--ink-secondary)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        margin: '0 auto',
+                        padding: 4
+                      }}>
+                      <Barcode size={15} />
+                      {showManual ? 'Hide manual entry' : 'Trouble scanning? Enter barcode digits manually'}
+                    </button>
+
+                    {showManual && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        style={{ marginTop: 10 }}>
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (manualInput.trim()) {
+                              handleBarcodeLookup(manualInput.trim());
+                            }
                           }}
-                        />
-                        <button
-                          type="submit"
-                          disabled={loading || !manualInput.trim()}
-                          className="btn-primary"
-                          style={{ padding: '0 16px', fontSize: 13, fontWeight: 600 }}>
-                          Lookup
-                        </button>
-                      </form>
-                    </motion.div>
-                  )}
-                </div>
+                          style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder="e.g. 3017620422003 (UPC/EAN)"
+                            value={manualInput}
+                            onChange={(e) => setManualInput(e.target.value.replace(/[^0-9]/g, ''))}
+                            style={{
+                              flex: 1,
+                              padding: '10px 14px',
+                              borderRadius: 10,
+                              border: '1px solid var(--glass-border)',
+                              background: 'var(--bg-elevated)',
+                              color: 'var(--ink-primary)',
+                              fontSize: 13,
+                              fontFamily: 'inherit'
+                            }}
+                          />
+                          <button
+                            type="submit"
+                            disabled={loading || !manualInput.trim()}
+                            className="btn-primary"
+                            style={{ padding: '0 16px', fontSize: 13, fontWeight: 600 }}>
+                            Lookup
+                          </button>
+                        </form>
+                      </motion.div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -751,20 +988,22 @@ export default function BarcodeScannerModal({
                         width: 58,
                         height: 58,
                         borderRadius: 12,
-                        background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.2))',
+                        background: scannedProduct.isLabelScan
+                          ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.2))'
+                          : 'linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.2))',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: 26,
                         flexShrink: 0
                       }}>
-                      🏷️
+                      {scannedProduct.isLabelScan ? '📋' : '🏷️'}
                     </div>
                   )}
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-blue)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      {scannedProduct.brand || 'Packaged Item'}
+                    <div style={{ fontSize: 11, fontWeight: 600, color: scannedProduct.isLabelScan ? 'var(--accent-green)' : 'var(--accent-blue)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      {scannedProduct.brand || (scannedProduct.isLabelScan ? 'Label Snapshot' : 'Packaged Item')}
                     </div>
                     <div
                       title={scannedProduct.name}
@@ -780,7 +1019,11 @@ export default function BarcodeScannerModal({
                       {scannedProduct.name}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2 }}>
-                      Barcode: <span className="mono-num">{scannedProduct.barcode}</span>
+                      {scannedProduct.barcode ? (
+                        <>Barcode: <span className="mono-num">{scannedProduct.barcode}</span></>
+                      ) : (
+                        <span>Verified via AI Label OCR</span>
+                      )}
                       {scannedProduct.nutriscore && (
                         <span
                           style={{
@@ -992,7 +1235,9 @@ export default function BarcodeScannerModal({
                       padding: '12px',
                       fontSize: 13,
                       fontWeight: 700,
-                      background: isLogged ? 'var(--accent-green)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      background: isLogged
+                        ? 'var(--accent-green)'
+                        : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1040,13 +1285,35 @@ export default function BarcodeScannerModal({
                 </div>
 
                 <h4 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: 'var(--ink-primary)' }}>
-                  Product Not in Database
+                  Barcode Not Found in Database
                 </h4>
                 <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginBottom: 16, lineHeight: 1.4 }}>
-                  Barcode <span className="mono-num" style={{ fontWeight: 600, color: 'var(--ink-primary)' }}>{notFoundBarcode}</span> wasn't found in Open Food Facts yet.
+                  Barcode <span className="mono-num" style={{ fontWeight: 600, color: 'var(--ink-primary)' }}>{notFoundBarcode}</span> is not cataloged in Open Food Facts yet.
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('label');
+                      setNotFoundBarcode(null);
+                      setScannedProduct(null);
+                      startScanner();
+                    }}
+                    className="btn-primary"
+                    style={{
+                      padding: '12px 16px',
+                      fontSize: 13,
+                      background: 'linear-gradient(135deg, #10b981, #059669)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
+                    }}>
+                    <Camera size={16} /> 📸 Snap Nutrition Table on Back
+                  </button>
+
                   {onAskAIWithText && (
                     <button
                       type="button"
@@ -1054,7 +1321,7 @@ export default function BarcodeScannerModal({
                         onClose();
                         onAskAIWithText('');
                       }}
-                      className="btn-primary"
+                      className="btn-secondary"
                       style={{ padding: '10px 16px', fontSize: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                       <Sparkles size={15} /> Type Name & Estimate with AI
                     </button>
@@ -1086,10 +1353,10 @@ export default function BarcodeScannerModal({
               justifyContent: 'space-between'
             }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <Info size={12} /> Powered by Open Food Facts (Free & Open Source)
+              <Info size={12} /> {activeTab === 'label' ? 'FSSAI/FDA OCR via Tesseract + Groq AI' : 'Open Food Facts Database'}
             </span>
             <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>
-              0 API Cost
+              Free Tier ($0)
             </span>
           </div>
 

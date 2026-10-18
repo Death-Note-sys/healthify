@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { analyzeFood, getFoodByBarcode } from '../controllers/nutritionController.js';
+import { analyzeFood, getFoodByBarcode, scanNutritionLabel } from '../controllers/nutritionController.js';
 
 const router = Router();
 
@@ -84,5 +84,12 @@ router.post('/analyze', nutritionLimiter, asyncHandler(analyzeFood));
  * Fetches food details by barcode (UPC / EAN) from Open Food Facts.
  */
 router.get('/barcode/:barcode', asyncHandler(getFoodByBarcode));
+
+/**
+ * POST /api/nutrition/scan-label
+ * 
+ * OCR & AI nutrition facts extraction from snapshot of food packet label.
+ */
+router.post('/scan-label', asyncHandler(scanNutritionLabel));
 
 export default router;
