@@ -26,7 +26,19 @@ export function useSupabaseData(authUser, FOOD_DB) {
   useEffect(() => {
     setActiveUserId(authUser?.id || null);
     if (authUser) {
-      // 1. Instantly restore cached food logs for this specific user
+      // 1. Instantly restore cached profile for this specific user
+      const localProfileKey = `healthify_user_profile_${authUser.id}`;
+      try {
+        const cachedProf = localStorage.getItem(localProfileKey);
+        if (cachedProf) {
+          const parsed = JSON.parse(cachedProf);
+          if (parsed && typeof parsed === 'object') {
+            setProfile(parsed);
+          }
+        }
+      } catch (e) {}
+
+      // 2. Instantly restore cached food logs for this specific user
       const localLogsKey = `healthify_user_logs_${authUser.id}`;
       try {
         const cached = localStorage.getItem(localLogsKey);
@@ -56,42 +68,97 @@ export function useSupabaseData(authUser, FOOD_DB) {
 
   // ── Profile ───────────────────────────────────────────────
   const loadProfile = async () => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', authUser.id)
-      .single();
-    
-    if (error && error.code !== 'PGRST116') {
-      console.error("loadProfile err", error);
+    if (!authUser?.id) return;
+    const localProfileKey = `healthify_user_profile_${authUser.id}`;
+
+    // Read local cache first for instant responsiveness
+    try {
+      const cached = localStorage.getItem(localProfileKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object') {
+          setProfile(parsed);
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') {
+        console.warn("loadProfile error:", error.message || error);
+      }
+      
+      if (data) {
+        setProfile(data);
+        try {
+          localStorage.setItem(localProfileKey, JSON.stringify(data));
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn("loadProfile network exception:", err);
     }
-    
-    if (data) {
-      console.log("loadProfile success:", data);
-    } else {
-      console.log("loadProfile returned no data. user id:", authUser.id);
-    }
-    
-    setProfile(data);
   };
 
   const saveProfile = async (profileData) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .upsert({
-        id: authUser.id,
-        ...profileData,
-        updated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      console.error("saveProfile error:", error);
+    if (!authUser?.id) return { data: null, error: new Error('User not logged in') };
+    const localProfileKey = `healthify_user_profile_${authUser.id}`;
+
+    // Sanitize data so no unexpected fields break Supabase PostgREST
+    const cleanProfile = {
+      name:     profileData.name || 'User',
+      age:      parseInt(profileData.age, 10) || 23,
+      weight:   parseFloat(profileData.weight) || 75,
+      height:   parseFloat(profileData.height) || 175,
+      gender:   profileData.gender === 'female' ? 'female' : 'male',
+      activity: profileData.activity || 'moderate',
+      goal:     ['cut', 'bulk', 'maintain'].includes(profileData.goal) ? profileData.goal : 'maintain',
+      calories: Math.round(profileData.calories) || 2000,
+      tdee:     Math.round(profileData.tdee) || 2000,
+      bmr:      Math.round(profileData.bmr) || 1600,
+      protein:  Math.round(profileData.protein) || 140,
+      carbs:    Math.round(profileData.carbs) || 200,
+      fat:      Math.round(profileData.fat) || 60,
+    };
+
+    // Optimistic UI update & immediate local persistence
+    const optimisticProfile = { id: authUser.id, ...cleanProfile, updated_at: new Date().toISOString() };
+    setProfile(optimisticProfile);
+    try {
+      localStorage.setItem(localProfileKey, JSON.stringify(optimisticProfile));
+    } catch (e) {}
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: authUser.id,
+          ...cleanProfile,
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.warn("saveProfile Supabase error:", error.message || error);
+      }
+      
+      if (!error && data) {
+        setProfile(data);
+        try {
+          localStorage.setItem(localProfileKey, JSON.stringify(data));
+        } catch (e) {}
+        return { data, error: null };
+      }
+      return { data: optimisticProfile, error };
+    } catch (err) {
+      console.warn("saveProfile network exception:", err);
+      return { data: optimisticProfile, error: err };
     }
-    
-    if (!error && data) setProfile(data);
-    return { data, error };
   };
 
   // ── Food logs (load past 30 days for full analytics & trends) ─────────────────

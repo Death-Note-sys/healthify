@@ -3170,7 +3170,13 @@ export default function Healthify() {
   }, []);
 
   // Demo state (persisted to localStorage so demo users retain logged meals across days/refreshes)
-  const [demoUser, setDemoUser]   = useState(null);
+  const [demoUser, setDemoUser]   = useState(() => {
+    try {
+      const saved = localStorage.getItem('healthify_demo_user');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return null;
+  });
   const [demoLogs, setDemoLogs]   = useState(() => {
     try {
       const saved = localStorage.getItem('healthify_demo_logs');
@@ -3216,9 +3222,9 @@ export default function Healthify() {
     if (demoMode || authLoading || supaData.loading) return;
     if (authUser) {
       if (supaData.profile) {
-        if (page === 'landing' || page === 'auth') setPage('dashboard');
+        if (page === 'landing' || page === 'auth' || page === 'onboard') setPage('dashboard');
       } else {
-        if (page !== 'onboard') setPage('onboard');
+        if (page === 'landing' || page === 'auth') setPage('onboard');
       }
     }
   }, [authUser, authLoading, supaData.profile, supaData.loading, demoMode, page]);
@@ -3283,18 +3289,20 @@ export default function Healthify() {
       setDemoWeightLogs(mkDemoWeightLogs(userData.weight || 75, userData.goal || 'bulk'));
       setPage('dashboard');
     } else {
-      const { error } = await supaData.saveProfile(userData);
-      if (!error) setPage('dashboard');
+      await supaData.saveProfile(userData);
+      setPage('dashboard');
     }
   };
 
   const handleDemo = () => {
     setDemoMode(true);
-    setDemoUser({
+    const demoProf = {
       name: 'Demo User', goal: 'bulk', calories: 2850, protein: 180,
       carbs: 295, fat: 88, gender: 'male', activity: 'moderate',
       age: 23, weight: 75, height: 175, tdee: 2550, bmr: 1844,
-    });
+    };
+    setDemoUser(demoProf);
+    try { localStorage.setItem('healthify_demo_user', JSON.stringify(demoProf)); } catch (e) {}
     setDemoWeightLogs(mkDemoWeightLogs(75, 'bulk'));
     setDemoLogs(prev => prev.length > 0 ? prev : mkDemoFoodLogs());
     setPage('dashboard');
@@ -3309,7 +3317,10 @@ export default function Healthify() {
       setDemoMode(false);
       setDemoUser(null);
       setDemoLogs(mkDemoFoodLogs());
-      try { localStorage.removeItem('healthify_demo_logs'); } catch (e) {}
+      try {
+        localStorage.removeItem('healthify_demo_logs');
+        localStorage.removeItem('healthify_demo_user');
+      } catch (e) {}
       setDemoWater(5);
       setDemoWeightLogs(mkDemoWeightLogs(75, 'bulk'));
     } else {
