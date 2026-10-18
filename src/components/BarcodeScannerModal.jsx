@@ -253,6 +253,46 @@ export default function BarcodeScannerModal({
     return canvas.toDataURL('image/jpeg', 0.85);
   };
 
+  const extractNumber = (val) => {
+    if (val == null) return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const match = String(val).replace(/,/g, '.').match(/[-+]?[0-9]*\.?[0-9]+/);
+    return match ? parseFloat(match[0]) : 0;
+  };
+
+  const extractCalories = (val) => {
+    if (val == null) return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const str = String(val).replace(/,/g, '.');
+    const kcalMatch = str.match(/(\d+(?:\.\d+)?)\s*k?cal/i);
+    if (kcalMatch) return parseFloat(kcalMatch[1]);
+    const kjMatch = str.match(/(\d+(?:\.\d+)?)\s*kj/i);
+    if (kjMatch) return Math.round(parseFloat(kjMatch[1]) / 4.184);
+    const match = str.match(/[-+]?[0-9]*\.?[0-9]+/);
+    return match ? parseFloat(match[0]) : 0;
+  };
+
+  const findNutrient = (obj, ...possibleKeys) => {
+    if (!obj || typeof obj !== 'object') return 0;
+    for (const k of possibleKeys) {
+      if (obj[k] != null) {
+        const num = extractNumber(obj[k]);
+        if (num !== 0 || obj[k] === 0 || obj[k] === '0') return num;
+      }
+    }
+    const lowerObj = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof k === 'string') {
+        lowerObj[k.toLowerCase().replace(/[^a-z0-9]/g, '')] = v;
+      }
+    }
+    for (const k of possibleKeys) {
+      const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (lowerObj[cleanK] != null) return extractNumber(lowerObj[cleanK]);
+    }
+    return 0;
+  };
+
   const callGeminiVisionDirect = async (imageDataUrl, productHint = '') => {
     const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!geminiKey) return null;
@@ -296,12 +336,8 @@ Return ONLY valid JSON.`;
     };
 
     const models = [
-      'gemini-3.5-flash',
-      'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.8-flash',
       'gemini-3.1-flash-lite',
-      'gemini-flash-latest'
+      'gemini-3.7-flash'
     ];
 
     for (const model of models) {
@@ -309,7 +345,7 @@ Return ONLY valid JSON.`;
         const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(15000),
           body: JSON.stringify(requestPayload)
         });
 
@@ -319,10 +355,47 @@ Return ONLY valid JSON.`;
           const match = raw.match(/\{[\s\S]*\}/);
           const parsed = match ? JSON.parse(match[0]) : JSON.parse(raw);
 
-          const p100 = parsed.per100g || {};
-          const pServ = parsed.perServing || {};
-          const hasCalories = (p100.cal != null && Number(p100.cal) > 0) || (pServ.cal != null && Number(pServ.cal) > 0);
-          const hasMacros = (p100.protein != null || pServ.protein != null || p100.carbs != null || pServ.carbs != null);
+          const p100Raw = parsed.per100g || {};
+          const pServRaw = parsed.perServing || {};
+          const microsRaw = parsed.micronutrients || {};
+
+          let cal100 = extractCalories(findNutrient(p100Raw, 'cal', 'calories', 'energy', 'kcal', 'energykcal')) ||
+                       extractCalories(findNutrient(parsed, 'cal', 'calories', 'energy', 'kcal', 'energykcal'));
+          let protein100 = findNutrient(p100Raw, 'protein', 'prot', 'proteins') ||
+                           findNutrient(parsed, 'protein', 'prot', 'proteins');
+          let carbs100 = findNutrient(p100Raw, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs') ||
+                         findNutrient(parsed, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs');
+          let fat100 = findNutrient(p100Raw, 'fat', 'totalfat', 'fats', 'totalfats') ||
+                       findNutrient(parsed, 'fat', 'totalfat', 'fats', 'totalfats');
+          let fiber100 = findNutrient(p100Raw, 'fiber', 'dietaryfiber', 'fibre') ||
+                         findNutrient(parsed, 'fiber', 'dietaryfiber', 'fibre');
+
+          let calServ = extractCalories(findNutrient(pServRaw, 'cal', 'calories', 'energy', 'kcal', 'energykcal'));
+          let proteinServ = findNutrient(pServRaw, 'protein', 'prot', 'proteins');
+          let carbsServ = findNutrient(pServRaw, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs');
+          let fatServ = findNutrient(pServRaw, 'fat', 'totalfat', 'fats', 'totalfats');
+
+          const servingGrams = extractNumber(parsed.servingGrams) || extractNumber(parsed.servingLabel) || 100;
+          const servingRatio = servingGrams > 0 ? (servingGrams / 100) : 1;
+
+          if (!cal100 && (protein100 || carbs100 || fat100)) {
+            cal100 = Math.round((protein100 * 4) + (carbs100 * 4) + (fat100 * 9));
+          }
+          if (!calServ && cal100) {
+            calServ = Math.round(cal100 * servingRatio);
+            if (!proteinServ) proteinServ = Math.round(protein100 * servingRatio * 10) / 10;
+            if (!carbsServ) carbsServ = Math.round(carbs100 * servingRatio * 10) / 10;
+            if (!fatServ) fatServ = Math.round(fat100 * servingRatio * 10) / 10;
+          }
+          if (!cal100 && calServ && servingRatio > 0) {
+            cal100 = Math.round(calServ / servingRatio);
+            if (!protein100) protein100 = Math.round((proteinServ / servingRatio) * 10) / 10;
+            if (!carbs100) carbs100 = Math.round((carbsServ / servingRatio) * 10) / 10;
+            if (!fat100) fat100 = Math.round((fatServ / servingRatio) * 10) / 10;
+          }
+
+          const hasCalories = cal100 > 0 || calServ > 0;
+          const hasMacros = protein100 > 0 || carbs100 > 0 || fat100 > 0 || proteinServ > 0;
 
           if (parsed.foodIdentified === false || (!hasCalories && !hasMacros && !parsed.productName)) {
             return null;
@@ -331,7 +404,6 @@ Return ONLY valid JSON.`;
           const name = parsed.productName || productHint || 'Scanned Nutrition Item';
           const brand = parsed.brand || '';
           const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
-          const micros = parsed.micronutrients || {};
 
           return {
             found: true,
@@ -339,27 +411,27 @@ Return ONLY valid JSON.`;
             rawName: name,
             brand,
             isLabelScan: true,
-            servingLabel: parsed.servingLabel || (parsed.servingGrams ? `${parsed.servingGrams}g` : '100g'),
-            servingGrams: Number(parsed.servingGrams) || 100,
+            servingLabel: parsed.servingLabel || (servingGrams ? `${servingGrams}g` : '100g'),
+            servingGrams,
             per100g: {
-              cal: Math.round(Number(p100.cal) || 0),
-              protein: Math.round((Number(p100.protein) || 0) * 10) / 10,
-              carbs: Math.round((Number(p100.carbs) || 0) * 10) / 10,
-              fat: Math.round((Number(p100.fat) || 0) * 10) / 10,
-              fiber: Math.round((Number(p100.fiber) || 0) * 10) / 10,
+              cal: Math.round(cal100),
+              protein: Math.round(protein100 * 10) / 10,
+              carbs: Math.round(carbs100 * 10) / 10,
+              fat: Math.round(fat100 * 10) / 10,
+              fiber: Math.round(fiber100 * 10) / 10,
             },
             perServing: {
-              cal: Math.round(Number(pServ.cal || p100.cal || 0)),
-              protein: Math.round((Number(pServ.protein || p100.protein || 0)) * 10) / 10,
-              carbs: Math.round((Number(pServ.carbs || p100.carbs || 0)) * 10) / 10,
-              fat: Math.round((Number(pServ.fat || p100.fat || 0)) * 10) / 10,
+              cal: Math.round(calServ || cal100),
+              protein: Math.round((proteinServ || protein100) * 10) / 10,
+              carbs: Math.round((carbsServ || carbs100) * 10) / 10,
+              fat: Math.round((fatServ || fat100) * 10) / 10,
             },
             micronutrients: {
-              sodium: Math.round(Number(micros.sodium || 0)),
-              iron: Math.round(Number(micros.iron || 0) * 10) / 10,
-              calcium: Math.round(Number(micros.calcium || 0) * 10) / 10,
-              vitD: Number(micros.vitD || 0),
-              vitB12: Number(micros.vitB12 || 0)
+              sodium: Math.round(findNutrient(microsRaw, 'sodium', 'salt') || findNutrient(p100Raw, 'sodium', 'salt')),
+              iron: Math.round((findNutrient(microsRaw, 'iron', 'fe') || findNutrient(p100Raw, 'iron')) * 10) / 10,
+              calcium: Math.round((findNutrient(microsRaw, 'calcium', 'ca') || findNutrient(p100Raw, 'calcium')) * 10) / 10,
+              vitD: findNutrient(microsRaw, 'vitd', 'vit_d', 'vitamind') || 0,
+              vitB12: findNutrient(microsRaw, 'vitb12', 'vit_b12', 'vitaminb12') || 0
             }
           };
         }
@@ -385,13 +457,14 @@ Return ONLY valid JSON.`;
 
     try {
       let data = null;
+      let backendError = null;
 
       // 1. First try the local backend API
       try {
         const res = await fetch('/api/nutrition/scan-label', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(25000),
           body: JSON.stringify({
             image: imageDataUrl,
             productHint: hint || (notFoundBarcode ? `Barcode ${notFoundBarcode}` : '')
@@ -402,6 +475,13 @@ Return ONLY valid JSON.`;
           const json = await res.json();
           if (json.found) {
             data = json;
+          } else if (json.error) {
+            backendError = json.error;
+          }
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          if (errJson.error?.message || errJson.error) {
+            backendError = errJson.error?.message || errJson.error;
           }
         }
       } catch (backendErr) {
@@ -415,7 +495,7 @@ Return ONLY valid JSON.`;
       }
 
       if (!data || !data.found) {
-        throw new Error('Could not read clear nutrition numbers from this photo. Please hold steady, ensure good lighting on the nutrition table, and tap Snap again.');
+        throw new Error(backendError || 'Could not read clear nutrition numbers from this photo. Please hold steady, ensure good lighting on the nutrition table, and tap Snap again.');
       }
 
       setScannedProduct(data);
@@ -459,6 +539,45 @@ Return ONLY valid JSON.`;
     };
     reader.readAsDataURL(file);
     e.target.value = '';
+  };
+
+  // Handle drag-and-drop of food label image
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      setLoading(true);
+      setLoadingMsg('Optimizing dropped photo for Gemini AI...');
+      try {
+        const resized = await resizeImageToMaxDimension(event.target.result, 1280, 0.85);
+        handleAnalyzeLabel(resized);
+      } catch (_) {
+        handleAnalyzeLabel(event.target.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Test with authentic pre-loaded sample FSSAI label
+  const handleTestSample = async () => {
+    setLoading(true);
+    setLoadingMsg('Loading sample FSSAI nutrition table...');
+    setCameraError(null);
+    try {
+      const res = await fetch('/samples/fssai_sample.jpg');
+      const blob = await res.blob();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        handleAnalyzeLabel(e.target.result, 'Masala Munch');
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      setCameraError('Failed to load sample image: ' + err.message);
+      setLoading(false);
+    }
   };
 
   // Initialize camera scanner
@@ -828,6 +947,8 @@ Return ONLY valid JSON.`;
             {!scannedProduct && !notFoundBarcode && (
               <div>
                 <div
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={handleDrop}
                   style={{
                     position: 'relative',
                     width: '100%',
@@ -997,13 +1118,22 @@ Return ONLY valid JSON.`;
                           <RefreshCw size={14} /> Try Camera Again
                         </button>
                         {activeTab === 'label' && (
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="btn-primary"
-                            style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <UploadCloud size={14} /> Upload Photo
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="btn-primary"
+                              style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              <UploadCloud size={14} /> Upload Photo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleTestSample}
+                              className="btn-secondary"
+                              style={{ padding: '8px 14px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(16, 185, 129, 0.15)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#34d399' }}>
+                              <Sparkles size={14} /> Try Sample FSSAI Table
+                            </button>
+                          </>
                         )}
                         {onAskAIWithText && (
                           <button
@@ -1024,7 +1154,7 @@ Return ONLY valid JSON.`;
 
                 {/* Shutter Button & Upload for Nutrition Label Mode */}
                 {activeTab === 'label' && (
-                  <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
+                  <div style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center' }}>
                     <button
                       type="button"
                       onClick={handleSnapLabelClick}
@@ -1032,7 +1162,7 @@ Return ONLY valid JSON.`;
                       className="btn-primary"
                       style={{
                         flex: 2,
-                        padding: '12px 16px',
+                        padding: '12px 14px',
                         fontSize: 13,
                         fontWeight: 700,
                         background: 'linear-gradient(135deg, #10b981, #059669)',
@@ -1042,7 +1172,7 @@ Return ONLY valid JSON.`;
                         gap: 8,
                         boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
                       }}>
-                      <Camera size={18} /> Snap & Analyze Table
+                      <Camera size={18} /> Snap & Analyze
                     </button>
 
                     <button
@@ -1050,21 +1180,43 @@ Return ONLY valid JSON.`;
                       onClick={() => fileInputRef.current?.click()}
                       disabled={loading}
                       className="btn-secondary"
-                      title="Upload photo from phone gallery"
+                      title="Upload photo from phone gallery or drag onto frame"
                       style={{
                         flex: 1,
-                        padding: '12px 14px',
+                        padding: '12px 10px',
                         fontSize: 13,
                         fontWeight: 600,
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: 6
+                        gap: 5
                       }}>
                       <UploadCloud size={16} /> Gallery
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={handleTestSample}
+                      disabled={loading}
+                      className="btn-secondary"
+                      title="Test with authentic pre-loaded FSSAI nutrition table"
+                      style={{
+                        flex: 1,
+                        padding: '12px 10px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 5,
+                        borderColor: 'rgba(16, 185, 129, 0.35)',
+                        color: 'var(--ink-primary)'
+                      }}>
+                      <Sparkles size={15} color="#10b981" /> Sample
+                    </button>
+
                     <input
+                      id="nutrition-label-file-input"
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"

@@ -212,6 +212,46 @@ function isValidImageBuffer(buf) {
   return false;
 }
 
+export function extractNumber(val) {
+  if (val == null) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const match = String(val).replace(/,/g, '.').match(/[-+]?[0-9]*\.?[0-9]+/);
+  return match ? parseFloat(match[0]) : 0;
+}
+
+export function extractCalories(val) {
+  if (val == null) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const str = String(val).replace(/,/g, '.');
+  const kcalMatch = str.match(/(\d+(?:\.\d+)?)\s*k?cal/i);
+  if (kcalMatch) return parseFloat(kcalMatch[1]);
+  const kjMatch = str.match(/(\d+(?:\.\d+)?)\s*kj/i);
+  if (kjMatch) return Math.round(parseFloat(kjMatch[1]) / 4.184);
+  const match = str.match(/[-+]?[0-9]*\.?[0-9]+/);
+  return match ? parseFloat(match[0]) : 0;
+}
+
+export function findNutrient(obj, ...possibleKeys) {
+  if (!obj || typeof obj !== 'object') return 0;
+  for (const k of possibleKeys) {
+    if (obj[k] != null) {
+      const num = extractNumber(obj[k]);
+      if (num !== 0 || obj[k] === 0 || obj[k] === '0') return num;
+    }
+  }
+  const lowerObj = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof k === 'string') {
+      lowerObj[k.toLowerCase().replace(/[^a-z0-9]/g, '')] = v;
+    }
+  }
+  for (const k of possibleKeys) {
+    const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (lowerObj[cleanK] != null) return extractNumber(lowerObj[cleanK]);
+  }
+  return 0;
+}
+
 // ── Persistent OCR Worker Singleton (initializes once, reuses in ~400ms) ──
 let ocrWorkerPromise = null;
 async function getOcrWorker() {
@@ -289,12 +329,8 @@ Return ONLY valid JSON.`;
         };
 
         const GEMINI_MODELS = [
-          'gemini-3.5-flash',
-          'gemini-3.6-flash',
-          'gemini-3.7-flash',
-          'gemini-3.8-flash',
           'gemini-3.1-flash-lite',
-          'gemini-flash-latest'
+          'gemini-3.7-flash'
         ];
 
         let gRes = null;
@@ -331,56 +367,93 @@ Return ONLY valid JSON.`;
           const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
           const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawContent);
 
-          const p100 = parsed.per100g || {};
-          const pServ = parsed.perServing || {};
-          const hasCalories = (p100.cal != null && Number(p100.cal) > 0) || (pServ.cal != null && Number(pServ.cal) > 0);
-          const hasMacros = (p100.protein != null || pServ.protein != null || p100.carbs != null || pServ.carbs != null);
+          const p100Raw = parsed.per100g || {};
+          const pServRaw = parsed.perServing || {};
+          const microsRaw = parsed.micronutrients || {};
 
-          if (parsed.foodIdentified === false || (!hasCalories && !hasMacros && !parsed.productName)) {
-            return res.json({
-              found: false,
-              error: 'Could not detect clear food packaging in this photo. Please hold steady with good lighting and tap Snap again.'
-            });
+          let cal100 = extractCalories(findNutrient(p100Raw, 'cal', 'calories', 'energy', 'kcal', 'energykcal')) ||
+                       extractCalories(findNutrient(parsed, 'cal', 'calories', 'energy', 'kcal', 'energykcal'));
+          let protein100 = findNutrient(p100Raw, 'protein', 'prot', 'proteins') ||
+                           findNutrient(parsed, 'protein', 'prot', 'proteins');
+          let carbs100 = findNutrient(p100Raw, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs') ||
+                         findNutrient(parsed, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs');
+          let fat100 = findNutrient(p100Raw, 'fat', 'totalfat', 'fats', 'totalfats') ||
+                       findNutrient(parsed, 'fat', 'totalfat', 'fats', 'totalfats');
+          let fiber100 = findNutrient(p100Raw, 'fiber', 'dietaryfiber', 'fibre') ||
+                         findNutrient(parsed, 'fiber', 'dietaryfiber', 'fibre');
+          let sugar100 = findNutrient(p100Raw, 'sugar', 'sugars', 'totalsugars', 'addedsugars') ||
+                         findNutrient(parsed, 'sugar', 'sugars', 'totalsugars', 'addedsugars');
+
+          let calServ = extractCalories(findNutrient(pServRaw, 'cal', 'calories', 'energy', 'kcal', 'energykcal'));
+          let proteinServ = findNutrient(pServRaw, 'protein', 'prot', 'proteins');
+          let carbsServ = findNutrient(pServRaw, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs');
+          let fatServ = findNutrient(pServRaw, 'fat', 'totalfat', 'fats', 'totalfats');
+
+          const servingGrams = extractNumber(parsed.servingGrams) || extractNumber(parsed.servingLabel) || 100;
+          const servingRatio = servingGrams > 0 ? (servingGrams / 100) : 1;
+
+          // Cross-calculate missing calories or macros
+          if (!cal100 && (protein100 || carbs100 || fat100)) {
+            cal100 = Math.round((protein100 * 4) + (carbs100 * 4) + (fat100 * 9));
+          }
+          if (!calServ && cal100) {
+            calServ = Math.round(cal100 * servingRatio);
+            if (!proteinServ) proteinServ = Math.round(protein100 * servingRatio * 10) / 10;
+            if (!carbsServ) carbsServ = Math.round(carbs100 * servingRatio * 10) / 10;
+            if (!fatServ) fatServ = Math.round(fat100 * servingRatio * 10) / 10;
+          }
+          if (!cal100 && calServ && servingRatio > 0) {
+            cal100 = Math.round(calServ / servingRatio);
+            if (!protein100) protein100 = Math.round((proteinServ / servingRatio) * 10) / 10;
+            if (!carbs100) carbs100 = Math.round((carbsServ / servingRatio) * 10) / 10;
+            if (!fat100) fat100 = Math.round((fatServ / servingRatio) * 10) / 10;
           }
 
+          const hasCalories = cal100 > 0 || calServ > 0;
+          const hasMacros = protein100 > 0 || carbs100 > 0 || fat100 > 0 || proteinServ > 0;
           const name = parsed.productName || productHint || 'Scanned Nutrition Item';
           const brand = parsed.brand || '';
           const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
+
+          if (parsed.foodIdentified === false || (!hasCalories && !hasMacros && (!name || name === 'Scanned Nutrition Item'))) {
+            return res.json({
+              found: false,
+              error: 'Could not detect clear food packaging or nutrition values in this photo. Please hold steady with good lighting and tap Snap again.'
+            });
+          }
+
           const micros = parsed.micronutrients || {};
 
-          console.log(`[Label Scanner] ✓ Gemini Vision (${successfulModel}) extracted: ${fullName} (${pServ.cal || p100.cal || 0} kcal)`);
+          console.log(`[Label Scanner] ✓ Gemini Vision (${successfulModel}) extracted: ${fullName} (${calServ || cal100} kcal)`);
           return res.json({
             found: true,
             name: fullName,
             rawName: name,
             brand,
             isLabelScan: true,
-            servingLabel: parsed.servingLabel || (parsed.servingGrams ? `${parsed.servingGrams}g` : '100g'),
-            servingGrams: Number(parsed.servingGrams) || 100,
+            servingLabel: parsed.servingLabel || (servingGrams ? `${servingGrams}g` : '100g'),
+            servingGrams,
             per100g: {
-              cal: Math.round(Number(p100.cal) || 0),
-              protein: Math.round((Number(p100.protein) || 0) * 10) / 10,
-              carbs: Math.round((Number(p100.carbs) || 0) * 10) / 10,
-              fat: Math.round((Number(p100.fat) || 0) * 10) / 10,
-              fiber: Math.round((Number(p100.fiber) || 0) * 10) / 10,
+              cal: Math.round(cal100),
+              protein: Math.round(protein100 * 10) / 10,
+              carbs: Math.round(carbs100 * 10) / 10,
+              fat: Math.round(fat100 * 10) / 10,
+              fiber: Math.round(fiber100 * 10) / 10,
             },
             perServing: {
-              cal: Math.round(Number(pServ.cal || p100.cal || 0)),
-              protein: Math.round((Number(pServ.protein || p100.protein || 0)) * 10) / 10,
-              carbs: Math.round((Number(pServ.carbs || p100.carbs || 0)) * 10) / 10,
-              fat: Math.round((Number(pServ.fat || p100.fat || 0)) * 10) / 10,
+              cal: Math.round(calServ || cal100),
+              protein: Math.round((proteinServ || protein100) * 10) / 10,
+              carbs: Math.round((carbsServ || carbs100) * 10) / 10,
+              fat: Math.round((fatServ || fat100) * 10) / 10,
             },
             micronutrients: {
-              sodium: Math.round(Number(micros.sodium || 0)),
-              iron: Math.round(Number(micros.iron || 0) * 10) / 10,
-              calcium: Math.round(Number(micros.calcium || 0) * 10) / 10,
-              vitD: Number(micros.vitD || 0),
-              vitB12: Number(micros.vitB12 || 0)
+              sodium: Math.round(findNutrient(microsRaw, 'sodium', 'salt') || findNutrient(p100Raw, 'sodium', 'salt')),
+              iron: Math.round((findNutrient(microsRaw, 'iron', 'fe') || findNutrient(p100Raw, 'iron')) * 10) / 10,
+              calcium: Math.round((findNutrient(microsRaw, 'calcium', 'ca') || findNutrient(p100Raw, 'calcium')) * 10) / 10,
+              vitD: findNutrient(microsRaw, 'vitd', 'vit_d', 'vitamind') || 0,
+              vitB12: findNutrient(microsRaw, 'vitb12', 'vit_b12', 'vitaminb12') || 0
             }
           });
-        } else {
-          const errData = await gRes.json().catch(() => ({}));
-          console.warn('[Label Scanner] Gemini Vision error:', errData.error?.message || gRes.status);
         }
       } catch (geminiErr) {
         console.warn('[Label Scanner] Gemini Vision failed or timed out, falling back to OCR + Groq:', geminiErr.message);
@@ -496,9 +569,33 @@ Return ONLY valid JSON.`;
     const brand = parsed.brand || '';
     const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
 
-    const p100 = parsed.per100g || {};
-    const pServ = parsed.perServing || {};
-    const micros = parsed.micronutrients || {};
+    const p100Raw = parsed.per100g || {};
+    const pServRaw = parsed.perServing || {};
+    const microsRaw = parsed.micronutrients || {};
+
+    let cal100 = findNutrient(p100Raw, 'cal', 'calories', 'energy', 'kcal', 'energykcal');
+    let protein100 = findNutrient(p100Raw, 'protein', 'prot');
+    let carbs100 = findNutrient(p100Raw, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs');
+    let fat100 = findNutrient(p100Raw, 'fat', 'totalfat', 'fats');
+    let fiber100 = findNutrient(p100Raw, 'fiber', 'dietaryfiber', 'fibre');
+
+    let calServ = findNutrient(pServRaw, 'cal', 'calories', 'energy', 'kcal', 'energykcal');
+    let proteinServ = findNutrient(pServRaw, 'protein', 'prot');
+    let carbsServ = findNutrient(pServRaw, 'carbs', 'carbohydrate', 'carbohydrates', 'totalcarbohydrate', 'totalcarbs');
+    let fatServ = findNutrient(pServRaw, 'fat', 'totalfat', 'fats');
+
+    const servingGrams = extractNumber(parsed.servingGrams) || extractNumber(parsed.servingLabel) || 100;
+    const servingRatio = servingGrams > 0 ? (servingGrams / 100) : 1;
+
+    if (!cal100 && (protein100 || carbs100 || fat100)) {
+      cal100 = Math.round((protein100 * 4) + (carbs100 * 4) + (fat100 * 9));
+    }
+    if (!calServ && cal100) {
+      calServ = Math.round(cal100 * servingRatio);
+      if (!proteinServ) proteinServ = Math.round(protein100 * servingRatio * 10) / 10;
+      if (!carbsServ) carbsServ = Math.round(carbs100 * servingRatio * 10) / 10;
+      if (!fatServ) fatServ = Math.round(fat100 * servingRatio * 10) / 10;
+    }
 
     const normalized = {
       found: true,
@@ -506,27 +603,27 @@ Return ONLY valid JSON.`;
       rawName: name,
       brand,
       isLabelScan: true,
-      servingLabel: parsed.servingLabel || '100g',
-      servingGrams: Number(parsed.servingGrams) || 100,
+      servingLabel: parsed.servingLabel || (servingGrams ? `${servingGrams}g` : '100g'),
+      servingGrams,
       per100g: {
-        cal: Math.round(Number(p100.cal) || 0),
-        protein: Math.round((Number(p100.protein) || 0) * 10) / 10,
-        carbs: Math.round((Number(p100.carbs) || 0) * 10) / 10,
-        fat: Math.round((Number(p100.fat) || 0) * 10) / 10,
-        fiber: Math.round((Number(p100.fiber) || 0) * 10) / 10,
+        cal: Math.round(cal100),
+        protein: Math.round(protein100 * 10) / 10,
+        carbs: Math.round(carbs100 * 10) / 10,
+        fat: Math.round(fat100 * 10) / 10,
+        fiber: Math.round(fiber100 * 10) / 10,
       },
       perServing: {
-        cal: Math.round(Number(pServ.cal || p100.cal || 0)),
-        protein: Math.round((Number(pServ.protein || p100.protein || 0)) * 10) / 10,
-        carbs: Math.round((Number(pServ.carbs || p100.carbs || 0)) * 10) / 10,
-        fat: Math.round((Number(pServ.fat || p100.fat || 0)) * 10) / 10,
+        cal: Math.round(calServ || cal100),
+        protein: Math.round((proteinServ || protein100) * 10) / 10,
+        carbs: Math.round((carbsServ || carbs100) * 10) / 10,
+        fat: Math.round((fatServ || fat100) * 10) / 10,
       },
       micronutrients: {
-        sodium: Math.round(Number(micros.sodium || 0)),
-        iron: Math.round(Number(micros.iron || 0) * 10) / 10,
-        calcium: Math.round(Number(micros.calcium || 0) * 10) / 10,
-        vitD: Number(micros.vitD || 0),
-        vitB12: Number(micros.vitB12 || 0)
+        sodium: Math.round(findNutrient(microsRaw, 'sodium', 'salt') || findNutrient(p100Raw, 'sodium', 'salt')),
+        iron: Math.round((findNutrient(microsRaw, 'iron', 'fe') || findNutrient(p100Raw, 'iron')) * 10) / 10,
+        calcium: Math.round((findNutrient(microsRaw, 'calcium', 'ca') || findNutrient(p100Raw, 'calcium')) * 10) / 10,
+        vitD: findNutrient(microsRaw, 'vitd', 'vit_d', 'vitamind') || 0,
+        vitB12: findNutrient(microsRaw, 'vitb12', 'vit_b12', 'vitaminb12') || 0
       }
     };
 
