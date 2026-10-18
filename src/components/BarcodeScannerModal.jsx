@@ -253,6 +253,120 @@ export default function BarcodeScannerModal({
     return canvas.toDataURL('image/jpeg', 0.85);
   };
 
+  const callGeminiVisionDirect = async (imageDataUrl, productHint = '') => {
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!geminiKey) return null;
+    const mimeMatch = imageDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
+
+    const geminiPrompt = `You are a clinical nutrition extraction system.
+Analyze this photo of a food package's nutrition facts / FSSAI table.
+User product hint: "${productHint || 'None'}".
+Determine if a nutrition facts / FSSAI / nutritional information table is visible.
+Extract the product title, brand, serving size, and all nutritional values per 100g and/or per serving.
+Return a STRICT JSON object in this exact format:
+{
+  "tableDetected": true,
+  "productName": "Product Name",
+  "brand": "Brand name",
+  "servingLabel": "e.g. 1 pack (40g) or 30g",
+  "servingGrams": 40,
+  "per100g": { "cal": 450, "protein": 8.5, "carbs": 62.0, "fat": 18.0, "fiber": 3.2, "sugar": 12.0 },
+  "perServing": { "cal": 180, "protein": 3.4, "carbs": 24.8, "fat": 7.2 },
+  "micronutrients": { "sodium": 320, "iron": 0, "calcium": 0, "vitD": 0, "vitB12": 0 }
+}
+If no nutrition table or numbers are visible in the photo, set "tableDetected": false and values to null.
+Calculate perServing from per100g and servingGrams if perServing is not explicitly printed. Return ONLY valid JSON.`;
+
+    const requestPayload = {
+      contents: [{
+        parts: [
+          { text: geminiPrompt },
+          { inline_data: { mime_type: mimeType, data: base64Data } }
+        ]
+      }],
+      generationConfig: {
+        response_mime_type: 'application/json',
+        thinking_config: { thinking_budget: 0 }
+      }
+    };
+
+    const models = [
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-3.7-flash',
+      'gemini-3.8-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest'
+    ];
+
+    for (const model of models) {
+      try {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(10000),
+          body: JSON.stringify(requestPayload)
+        });
+
+        if (resp.ok) {
+          const json = await resp.json();
+          const raw = json.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+          const match = raw.match(/\{[\s\S]*\}/);
+          const parsed = match ? JSON.parse(match[0]) : JSON.parse(raw);
+
+          const p100 = parsed.per100g || {};
+          const pServ = parsed.perServing || {};
+          const hasCalories = (p100.cal != null && Number(p100.cal) > 0) || (pServ.cal != null && Number(pServ.cal) > 0);
+          const hasMacros = (p100.protein != null || pServ.protein != null || p100.carbs != null || pServ.carbs != null);
+
+          if (parsed.tableDetected === false || (!hasCalories && !hasMacros && !parsed.productName)) {
+            return null;
+          }
+
+          const name = parsed.productName || productHint || 'Scanned Nutrition Item';
+          const brand = parsed.brand || '';
+          const fullName = brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name;
+          const micros = parsed.micronutrients || {};
+
+          return {
+            found: true,
+            name: fullName,
+            rawName: name,
+            brand,
+            isLabelScan: true,
+            servingLabel: parsed.servingLabel || (parsed.servingGrams ? `${parsed.servingGrams}g` : '100g'),
+            servingGrams: Number(parsed.servingGrams) || 100,
+            per100g: {
+              cal: Math.round(Number(p100.cal) || 0),
+              protein: Math.round((Number(p100.protein) || 0) * 10) / 10,
+              carbs: Math.round((Number(p100.carbs) || 0) * 10) / 10,
+              fat: Math.round((Number(p100.fat) || 0) * 10) / 10,
+              fiber: Math.round((Number(p100.fiber) || 0) * 10) / 10,
+            },
+            perServing: {
+              cal: Math.round(Number(pServ.cal || p100.cal || 0)),
+              protein: Math.round((Number(pServ.protein || p100.protein || 0)) * 10) / 10,
+              carbs: Math.round((Number(pServ.carbs || p100.carbs || 0)) * 10) / 10,
+              fat: Math.round((Number(pServ.fat || p100.fat || 0)) * 10) / 10,
+            },
+            micronutrients: {
+              sodium: Math.round(Number(micros.sodium || 0)),
+              iron: Math.round(Number(micros.iron || 0) * 10) / 10,
+              calcium: Math.round(Number(micros.calcium || 0) * 10) / 10,
+              vitD: Number(micros.vitD || 0),
+              vitB12: Number(micros.vitB12 || 0)
+            }
+          };
+        }
+      } catch (err) {
+        console.warn(`Direct Gemini ${model} failed:`, err.message);
+      }
+    }
+    return null;
+  };
+
   // Analyze nutrition label photo with Gemini Multimodal Vision AI
   const handleAnalyzeLabel = async (imageDataUrl, hint = '') => {
     setLoading(true);
@@ -266,27 +380,39 @@ export default function BarcodeScannerModal({
       setLoadingMsg('Extracting calories, protein, carbs & serving sizes...');
     }, 2200);
 
-    if (scannerRef.current && scannerRef.current.isScanning) {
-      try {
-        await scannerRef.current.stop();
-      } catch (err) {
-        console.warn('Scanner pause error:', err);
-      }
-    }
-
     try {
-      const res = await fetch('/api/nutrition/scan-label', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: imageDataUrl,
-          productHint: hint || (notFoundBarcode ? `Barcode ${notFoundBarcode}` : '')
-        })
-      });
+      let data = null;
 
-      const data = await res.json();
-      if (!res.ok || !data.found) {
-        throw new Error(data.error || 'Could not parse clear nutrition facts from this image.');
+      // 1. First try the local backend API
+      try {
+        const res = await fetch('/api/nutrition/scan-label', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(10000),
+          body: JSON.stringify({
+            image: imageDataUrl,
+            productHint: hint || (notFoundBarcode ? `Barcode ${notFoundBarcode}` : '')
+          })
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.found) {
+            data = json;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend label scan error, falling back to direct vision:', backendErr.message);
+      }
+
+      // 2. If backend proxy was slow or failed, use direct Gemini Vision API
+      if (!data) {
+        setLoadingMsg('Connecting to Gemini Vision Cloud...');
+        data = await callGeminiVisionDirect(imageDataUrl, hint);
+      }
+
+      if (!data || !data.found) {
+        throw new Error('Could not read clear nutrition numbers from this photo. Please hold steady, ensure good lighting on the nutrition table, and tap Snap again.');
       }
 
       setScannedProduct(data);
@@ -296,7 +422,7 @@ export default function BarcodeScannerModal({
     } catch (err) {
       console.error('Label scan error:', err);
       setCameraError(err.message || 'Failed to extract nutrition facts. Please try closer with good lighting.');
-      startScanner();
+      // NOTE: Do NOT call startScanner() here, otherwise cameraError is immediately erased to null!
     } finally {
       clearTimeout(progressTimer);
       setLoading(false);

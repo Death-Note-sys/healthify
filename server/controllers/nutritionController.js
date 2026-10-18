@@ -244,10 +244,6 @@ export async function scanNutritionLabel(req, res) {
   const groqApiKey = process.env.GROQ_API_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
-  if (!groqApiKey && !geminiApiKey) {
-    return res.status(500).json({ error: { message: 'No AI API key (GROQ_API_KEY or GEMINI_API_KEY) configured.' } });
-  }
-
   try {
     const mimeMatch = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
     const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';

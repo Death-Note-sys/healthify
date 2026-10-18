@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ['react', 'react-dom'],
+  },
   build: {
     outDir: 'dist',
     sourcemap: false,
@@ -10,21 +13,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('scheduler')) {
-              return 'vendor-react';
-            }
-            if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor')) {
-              return 'vendor-charts';
-            }
-            if (id.includes('framer-motion')) {
-              return 'vendor-motion';
-            }
-            if (id.includes('@supabase')) {
-              return 'vendor-supabase';
-            }
-            if (id.includes('lucide-react')) {
-              return 'vendor-icons';
-            }
             if (id.includes('html5-qrcode')) {
               return 'vendor-scanner';
             }
@@ -34,6 +22,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,
     port: 3000,
     open: true,
     proxy: {
