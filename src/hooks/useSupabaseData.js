@@ -162,12 +162,20 @@ export function useSupabaseData(authUser, FOOD_DB) {
     const fatCalc = Math.round((rem * 0.28) / 9);
     const carbsCalc = Math.round((rem * 0.72) / 4);
 
-    const resolvedCalories = Math.round(profileData.calories ?? current.calories ?? calCalc);
-    const resolvedTdee     = Math.round(profileData.tdee ?? current.tdee ?? tdeeCalc);
-    const resolvedBmr      = Math.round(profileData.bmr ?? current.bmr ?? bmrCalc);
-    const resolvedProtein  = Math.round(profileData.protein ?? current.protein ?? protCalc);
-    const resolvedCarbs    = Math.round(profileData.carbs ?? current.carbs ?? carbsCalc);
-    const resolvedFat      = Math.round(profileData.fat ?? current.fat ?? fatCalc);
+    const metricsChanged = 
+      (profileData.goal !== undefined && profileData.goal !== current.goal) ||
+      (profileData.weight !== undefined && profileData.weight !== current.weight) ||
+      (profileData.height !== undefined && profileData.height !== current.height) ||
+      (profileData.age !== undefined && profileData.age !== current.age) ||
+      (profileData.activity !== undefined && profileData.activity !== current.activity) ||
+      (profileData.gender !== undefined && profileData.gender !== current.gender);
+
+    const resolvedCalories = Math.round(profileData.calories !== undefined ? profileData.calories : (metricsChanged || !current.calories ? calCalc : current.calories));
+    const resolvedTdee     = Math.round(profileData.tdee !== undefined ? profileData.tdee : (metricsChanged || !current.tdee ? tdeeCalc : current.tdee));
+    const resolvedBmr      = Math.round(profileData.bmr !== undefined ? profileData.bmr : (metricsChanged || !current.bmr ? bmrCalc : current.bmr));
+    const resolvedProtein  = Math.round(profileData.protein !== undefined ? profileData.protein : (metricsChanged || !current.protein ? protCalc : current.protein));
+    const resolvedCarbs    = Math.round(profileData.carbs !== undefined ? profileData.carbs : (metricsChanged || !current.carbs ? carbsCalc : current.carbs));
+    const resolvedFat      = Math.round(profileData.fat !== undefined ? profileData.fat : (metricsChanged || !current.fat ? fatCalc : current.fat));
 
     const cleanProfile = {
       name:     resolvedName,

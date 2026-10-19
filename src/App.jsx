@@ -722,8 +722,8 @@ const Landing = ({ onStart, onDemo }) => {
 };
 
 // ── Onboarding (3 steps) ─────────────────────────────────────
-const Onboard = ({ onFinish, initialData, onCancel }) => {
-  const [step, setStep] = useState(1);
+const Onboard = ({ onFinish, initialData, onCancel, initialStep = 1 }) => {
+  const [step, setStep] = useState(initialStep);
   const [form, setForm] = useState(() => ({
     name:     initialData?.name || '',
     age:      initialData?.age || 23,
@@ -2618,7 +2618,7 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
 };
 
 // ── Profile Page (Part 5) ─────────────────────────────────────
-const Profile = ({ user, logs, setPage, signOut, pwa }) => {
+const Profile = ({ user, logs, setPage, signOut, pwa, saveProfile, setOnboardStep }) => {
   if (!user) return (
     <div style={{ minHeight: 'calc(100vh - 72px)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: 24, textAlign: 'center' }}>
       <User size={48} color="var(--ink-muted)" style={{ marginBottom: 16 }} />
@@ -2627,12 +2627,64 @@ const Profile = ({ user, logs, setPage, signOut, pwa }) => {
         <div style={{ fontSize: 13, color: 'var(--ink-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
           Complete onboarding to unlock your personalized nutrition profile.
         </div>
-        <button className="btn-primary" onClick={() => setPage('onboard')} style={{ width: '100%', padding: '10px 16px', fontSize: 14 }}>
+        <button className="btn-primary" onClick={() => { if (setOnboardStep) setOnboardStep(1); setPage('onboard'); }} style={{ width: '100%', padding: '10px 16px', fontSize: 14 }}>
           Set Up Profile
         </button>
       </div>
     </div>
   );
+
+  const [editGoalOpen, setEditGoalOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+
+  const [selectedGoal, setSelectedGoal] = useState(user.goal || 'maintain');
+  const [savingGoal, setSavingGoal] = useState(false);
+
+  const [profileForm, setProfileForm] = useState({
+    name:     user.name || '',
+    age:      user.age || 23,
+    weight:   user.weight || 75,
+    height:   user.height || 175,
+    gender:   user.gender || 'male',
+    activity: user.activity || 'moderate',
+    goal:     user.goal || 'maintain',
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setSelectedGoal(user.goal || 'maintain');
+      setProfileForm({
+        name:     user.name || '',
+        age:      user.age || 23,
+        weight:   user.weight || 75,
+        height:   user.height || 175,
+        gender:   user.gender || 'male',
+        activity: user.activity || 'moderate',
+        goal:     user.goal || 'maintain',
+      });
+    }
+  }, [user]);
+
+  const updProfile = (k, v) => setProfileForm(p => ({ ...p, [k]: v }));
+
+  const previewGoalNutrition = calcNutrition({
+    age:      user.age || 23,
+    weight:   user.weight || 75,
+    height:   user.height || 175,
+    gender:   user.gender || 'male',
+    activity: user.activity || 'moderate',
+    goal:     selectedGoal,
+  });
+
+  const previewProfileNutrition = calcNutrition({
+    age:      profileForm.age || 23,
+    weight:   profileForm.weight || 75,
+    height:   profileForm.height || 175,
+    gender:   profileForm.gender || 'male',
+    activity: profileForm.activity || 'moderate',
+    goal:     profileForm.goal || 'maintain',
+  });
 
   const gi  = GOALS.find(g => g.key === user.goal) || GOALS[1];
   const bmi = (user.weight / ((user.height / 100) ** 2)).toFixed(1);
@@ -2714,7 +2766,18 @@ const Profile = ({ user, logs, setPage, signOut, pwa }) => {
         </div>
         <button
           className="btn-secondary"
-          onClick={() => setPage('onboard')}
+          onClick={() => {
+            setProfileForm({
+              name:     user.name || '',
+              age:      user.age || 23,
+              weight:   user.weight || 75,
+              height:   user.height || 175,
+              gender:   user.gender || 'male',
+              activity: user.activity || 'moderate',
+              goal:     user.goal || 'maintain',
+            });
+            setEditProfileOpen(true);
+          }}
           style={{ padding: '6px 14px', fontSize: 12, gap: 6, display: 'inline-flex', alignItems: 'center' }}>
           <Edit3 size={13} /> Edit Profile & Goals
         </button>
@@ -2732,7 +2795,13 @@ const Profile = ({ user, logs, setPage, signOut, pwa }) => {
           <div className="display" style={{ fontSize: 20, fontWeight: 600, color: 'var(--ink-primary)', letterSpacing: '-0.01em' }}>{gi.label}</div>
           <div style={{ fontSize: 13, color: 'var(--ink-muted)', marginTop: 4 }}>{gi.desc}</div>
         </div>
-        <button className="btn-secondary" onClick={() => setPage('onboard')} style={{ padding: '8px 16px', fontSize: 13 }}>
+        <button
+          className="btn-secondary"
+          onClick={() => {
+            setSelectedGoal(user.goal || 'maintain');
+            setEditGoalOpen(true);
+          }}
+          style={{ padding: '8px 16px', fontSize: 13 }}>
           Edit
         </button>
       </motion.div>
@@ -2906,6 +2975,286 @@ const Profile = ({ user, logs, setPage, signOut, pwa }) => {
           <X size={16} /> Sign Out
         </motion.button>
       )}
+
+      {/* ── Edit Goal Modal ── */}
+      <AnimatePresence>
+        {editGoalOpen && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+          }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="glass-card"
+              style={{ width: '100%', maxWidth: 440, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div className="display" style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink-primary)' }}>
+                  Update Current Goal
+                </div>
+                <button onClick={() => setEditGoalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-muted)' }}>
+                  <X size={20} />
+                </button>
+              </div>
+
+              <p style={{ fontSize: 13, color: 'var(--ink-secondary)', marginBottom: 20 }}>
+                Choose your primary fitness objective. Daily calories and macros recalculate automatically.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+                {GOALS.map(g => {
+                  const isSelected = selectedGoal === g.key;
+                  return (
+                    <div
+                      key={g.key}
+                      onClick={() => setSelectedGoal(g.key)}
+                      style={{
+                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer',
+                        border: `1.5px solid ${isSelected ? g.color : 'var(--glass-border)'}`,
+                        background: isSelected ? 'var(--bg-elevated)' : 'transparent',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        <span style={{ fontSize: 24 }}>{g.emoji}</span>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14, color: isSelected ? g.color : 'var(--ink-primary)' }}>
+                            {g.label}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>{g.desc}</div>
+                        </div>
+                      </div>
+                      {isSelected && <Check size={18} color={g.color} />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {previewGoalNutrition && (
+                <div style={{ background: 'var(--bg-elevated)', borderRadius: 12, padding: 14, marginBottom: 20, border: '1px solid var(--glass-border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                    New Target Preview
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span className="mono-num display" style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink-primary)' }}>
+                      {previewGoalNutrition.calories} <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-muted)' }}>kcal/day</span>
+                    </span>
+                    <div style={{ fontSize: 12, color: 'var(--ink-secondary)', display: 'flex', gap: 10 }}>
+                      <span>P: <strong>{previewGoalNutrition.protein}g</strong></span>
+                      <span>C: <strong>{previewGoalNutrition.carbs}g</strong></span>
+                      <span>F: <strong>{previewGoalNutrition.fat}g</strong></span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    setEditGoalOpen(false);
+                    if (setOnboardStep) setOnboardStep(2);
+                    setPage('onboard');
+                  }}
+                  style={{ flex: 1, padding: '12px', fontSize: 13 }}
+                >
+                  Full Wizard
+                </button>
+                <button
+                  className="btn-primary"
+                  disabled={savingGoal}
+                  onClick={async () => {
+                    if (!saveProfile) return;
+                    setSavingGoal(true);
+                    try {
+                      await saveProfile({ goal: selectedGoal, ...previewGoalNutrition });
+                      setEditGoalOpen(false);
+                    } finally {
+                      setSavingGoal(false);
+                    }
+                  }}
+                  style={{ flex: 2, padding: '12px', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  {savingGoal ? <Loader2 size={16} className="animate-spin" /> : 'Save Goal'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Edit Profile & Details Modal ── */}
+      <AnimatePresence>
+        {editProfileOpen && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+          }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="glass-card"
+              style={{ width: '100%', maxWidth: 460, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div className="display" style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink-primary)' }}>
+                  Edit Profile & Goals
+                </div>
+                <button onClick={() => setEditProfileOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-muted)' }}>
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Name */}
+              <div style={{ marginBottom: 16 }}>
+                <FieldLabel>Name</FieldLabel>
+                <input
+                  type="text"
+                  value={profileForm.name}
+                  onChange={e => updProfile('name', e.target.value)}
+                  placeholder="Your Name"
+                  style={{
+                    width: '100%', background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
+                    borderRadius: 12, color: 'var(--ink-primary)', padding: '12px 14px',
+                    fontFamily: 'inherit', fontSize: 14, outline: 'none'
+                  }}
+                />
+              </div>
+
+              {/* Age, Weight, Height Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+                <NumInput label="Age" value={profileForm.age} onChange={v => updProfile('age', v)} min={15} max={85} />
+                <NumInput label="Weight (kg)" value={profileForm.weight} onChange={v => updProfile('weight', v)} min={30} max={250} />
+                <NumInput label="Height (cm)" value={profileForm.height} onChange={v => updProfile('height', v)} min={120} max={230} />
+              </div>
+
+              {/* Gender */}
+              <div style={{ marginBottom: 16 }}>
+                <FieldLabel>Gender</FieldLabel>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {[['male', 'Male'], ['female', 'Female']].map(([val, lbl]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => updProfile('gender', val)}
+                      style={{
+                        flex: 1, padding: '10px', borderRadius: 10, cursor: 'pointer',
+                        fontWeight: 500, fontFamily: 'inherit', fontSize: 13,
+                        background: profileForm.gender === val ? 'var(--ink-primary)' : 'transparent',
+                        border: `1px solid ${profileForm.gender === val ? 'var(--ink-primary)' : 'var(--glass-border)'}`,
+                        color: profileForm.gender === val ? 'var(--bg-base)' : 'var(--ink-secondary)',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Goal */}
+              <div style={{ marginBottom: 16 }}>
+                <FieldLabel>Goal</FieldLabel>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {GOALS.map(g => (
+                    <button
+                      key={g.key}
+                      type="button"
+                      onClick={() => updProfile('goal', g.key)}
+                      style={{
+                        flex: 1, padding: '10px 8px', borderRadius: 10, cursor: 'pointer',
+                        fontWeight: 600, fontFamily: 'inherit', fontSize: 12, textAlign: 'center',
+                        background: profileForm.goal === g.key ? 'var(--bg-elevated)' : 'transparent',
+                        border: `1.5px solid ${profileForm.goal === g.key ? g.color : 'var(--glass-border)'}`,
+                        color: profileForm.goal === g.key ? g.color : 'var(--ink-secondary)',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {g.emoji} {g.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Activity Level */}
+              <div style={{ marginBottom: 20 }}>
+                <FieldLabel>Activity Level</FieldLabel>
+                <select
+                  value={profileForm.activity}
+                  onChange={e => updProfile('activity', e.target.value)}
+                  style={{
+                    width: '100%', background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)',
+                    borderRadius: 12, color: 'var(--ink-primary)', padding: '12px 14px',
+                    fontFamily: 'inherit', fontSize: 13, outline: 'none'
+                  }}
+                >
+                  {ACTS.map(a => (
+                    <option key={a.key} value={a.key}>
+                      {a.emoji} {a.label} ({a.desc})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Live Preview */}
+              {previewProfileNutrition && (
+                <div style={{ background: 'var(--bg-elevated)', borderRadius: 12, padding: 14, marginBottom: 20, border: '1px solid var(--glass-border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                    Calculated Nutrition
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span className="mono-num display" style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink-primary)' }}>
+                      {previewProfileNutrition.calories} <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-muted)' }}>kcal/day</span>
+                    </span>
+                    <div style={{ fontSize: 12, color: 'var(--ink-secondary)', display: 'flex', gap: 10 }}>
+                      <span>P: <strong>{previewProfileNutrition.protein}g</strong></span>
+                      <span>C: <strong>{previewProfileNutrition.carbs}g</strong></span>
+                      <span>F: <strong>{previewProfileNutrition.fat}g</strong></span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    setEditProfileOpen(false);
+                    if (setOnboardStep) setOnboardStep(1);
+                    setPage('onboard');
+                  }}
+                  style={{ flex: 1, padding: '12px', fontSize: 13 }}
+                >
+                  Full Wizard
+                </button>
+                <button
+                  className="btn-primary"
+                  disabled={savingProfile}
+                  onClick={async () => {
+                    if (!saveProfile) return;
+                    setSavingProfile(true);
+                    try {
+                      await saveProfile({ ...profileForm, ...previewProfileNutrition });
+                      setEditProfileOpen(false);
+                    } finally {
+                      setSavingProfile(false);
+                    }
+                  }}
+                  style={{ flex: 2, padding: '12px', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  {savingProfile ? <Loader2 size={16} className="animate-spin" /> : 'Save Changes'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
@@ -3294,6 +3643,7 @@ export default function Healthify() {
 
   // ── Navigation & demo mode ──
   const [page, setPage]         = useState('landing');
+  const [onboardStep, setOnboardStep] = useState(1);
   const [demoMode, setDemoMode] = useState(false);
 
   // Handle PWA shortcut navigation (e.g. launching from phone home screen)
@@ -3360,7 +3710,7 @@ export default function Healthify() {
     if (demoMode || authLoading || supaData.loading) return;
     if (authUser) {
       if (supaData.profile) {
-        if (page === 'landing' || page === 'auth' || page === 'onboard') setPage('dashboard');
+        if (page === 'landing' || page === 'auth') setPage('dashboard');
       } else {
         if (page === 'landing' || page === 'auth') setPage('onboard');
       }
@@ -3425,12 +3775,23 @@ export default function Healthify() {
     if (demoMode) {
       setDemoUser(userData);
       setDemoWeightLogs(mkDemoWeightLogs(userData.weight || 75, userData.goal || 'bulk'));
-      setPage('dashboard');
+      setPage('profile');
     } else {
       await supaData.saveProfile(userData);
-      setPage('dashboard');
+      setPage('profile');
     }
   };
+
+  const handleSaveProfile = demoMode
+    ? async (data) => {
+        setDemoUser(prev => {
+          const updated = { ...prev, ...data };
+          try { localStorage.setItem('healthify_demo_user', JSON.stringify(updated)); } catch (e) {}
+          return updated;
+        });
+        return { data, error: null };
+      }
+    : supaData.saveProfile;
 
   const handleDemo = () => {
     setDemoMode(true);
@@ -3496,6 +3857,7 @@ export default function Healthify() {
         onFinish={handleFinish}
         initialData={activeUser || (authUser?.user_metadata?.name ? { name: authUser.user_metadata.name } : null)}
         onCancel={activeUser ? () => setPage('profile') : null}
+        initialStep={onboardStep}
       />
     </div>
   );
@@ -3526,7 +3888,17 @@ export default function Healthify() {
           initialChatMsg={initialChatMsg}
         />
       )}
-      {page === 'profile'   && <Profile user={activeUser} logs={activeLogs} setPage={setPage} signOut={handleSignOut} pwa={pwa} />}
+      {page === 'profile'   && (
+        <Profile
+          user={activeUser}
+          logs={activeLogs}
+          setPage={setPage}
+          signOut={handleSignOut}
+          pwa={pwa}
+          saveProfile={handleSaveProfile}
+          setOnboardStep={setOnboardStep}
+        />
+      )}
       <TabBar page={page} setPage={setPage} />
     </div>
   );
