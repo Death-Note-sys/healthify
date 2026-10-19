@@ -28,11 +28,15 @@ export function useSupabaseData(authUser, FOOD_DB) {
     if (authUser) {
       // 1. Instantly restore cached profile for this specific user
       const localProfileKey = `healthify_user_profile_${authUser.id}`;
+      const authName = authUser?.user_metadata?.name || authUser?.user_metadata?.full_name || '';
       try {
         const cachedProf = localStorage.getItem(localProfileKey);
         if (cachedProf) {
           const parsed = JSON.parse(cachedProf);
           if (parsed && typeof parsed === 'object') {
+            if ((!parsed.name || parsed.name === 'User') && authName) {
+              parsed.name = authName;
+            }
             setProfile(parsed);
           }
         }
@@ -70,6 +74,7 @@ export function useSupabaseData(authUser, FOOD_DB) {
   const loadProfile = async () => {
     if (!authUser?.id) return;
     const localProfileKey = `healthify_user_profile_${authUser.id}`;
+    const authName = authUser?.user_metadata?.name || authUser?.user_metadata?.full_name || '';
 
     // Read local cache first for instant responsiveness
     try {
@@ -77,6 +82,9 @@ export function useSupabaseData(authUser, FOOD_DB) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === 'object') {
+          if ((!parsed.name || parsed.name === 'User') && authName) {
+            parsed.name = authName;
+          }
           setProfile(parsed);
         }
       }
@@ -94,6 +102,11 @@ export function useSupabaseData(authUser, FOOD_DB) {
       }
       
       if (data) {
+        // Heal name if corrupted to 'User' or missing
+        if ((!data.name || data.name === 'User') && authName) {
+          data.name = authName;
+          supabase.from('profiles').update({ name: authName }).eq('id', authUser.id).then(() => {});
+        }
         setProfile(data);
         try {
           localStorage.setItem(localProfileKey, JSON.stringify(data));
@@ -108,21 +121,68 @@ export function useSupabaseData(authUser, FOOD_DB) {
     if (!authUser?.id) return { data: null, error: new Error('User not logged in') };
     const localProfileKey = `healthify_user_profile_${authUser.id}`;
 
-    // Sanitize data so no unexpected fields break Supabase PostgREST
+    // 1. Retrieve current existing profile from state or local cache to prevent data loss
+    let current = profile || {};
+    try {
+      const cached = localStorage.getItem(localProfileKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object') {
+          current = { ...parsed, ...current };
+        }
+      }
+    } catch (e) {}
+
+    // Resolve name: prioritize non-empty profileData, then existing profile, then auth user metadata
+    const authName = authUser?.user_metadata?.name || authUser?.user_metadata?.full_name || '';
+    let resolvedName = profileData.name !== undefined ? profileData.name : current.name;
+    if (!resolvedName || resolvedName === 'User') {
+      resolvedName = authName || current.name || 'User';
+    }
+
+    const resolvedAge      = parseInt(profileData.age !== undefined ? profileData.age : current.age, 10) || 23;
+    const resolvedWeight   = parseFloat(profileData.weight !== undefined ? profileData.weight : current.weight) || 75;
+    const resolvedHeight   = parseFloat(profileData.height !== undefined ? profileData.height : current.height) || 175;
+    const resolvedGender   = (profileData.gender !== undefined ? profileData.gender : current.gender) === 'female' ? 'female' : 'male';
+    const resolvedActivity = profileData.activity !== undefined ? profileData.activity : (current.activity || 'moderate');
+    
+    const candidateGoal = profileData.goal !== undefined ? profileData.goal : current.goal;
+    const resolvedGoal  = ['cut', 'bulk', 'maintain'].includes(candidateGoal) ? candidateGoal : (current.goal || 'maintain');
+
+    // Calculate baseline nutrition if needed
+    const s = resolvedGender === 'male' ? 5 : -161;
+    const bmrCalc = Math.round(10 * resolvedWeight + 6.25 * resolvedHeight - 5 * resolvedAge + s);
+    const actMults = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very: 1.9 };
+    const tdeeCalc = Math.round(bmrCalc * (actMults[resolvedActivity] || 1.55));
+    const goalAdj = resolvedGoal === 'cut' ? -500 : resolvedGoal === 'bulk' ? 300 : 0;
+    const calCalc = Math.round(tdeeCalc + goalAdj);
+    const pMult = resolvedGoal === 'cut' ? 2.2 : resolvedGoal === 'bulk' ? 2.0 : 1.8;
+    const protCalc = Math.round(resolvedWeight * pMult);
+    const rem = calCalc - protCalc * 4;
+    const fatCalc = Math.round((rem * 0.28) / 9);
+    const carbsCalc = Math.round((rem * 0.72) / 4);
+
+    const resolvedCalories = Math.round(profileData.calories ?? current.calories ?? calCalc);
+    const resolvedTdee     = Math.round(profileData.tdee ?? current.tdee ?? tdeeCalc);
+    const resolvedBmr      = Math.round(profileData.bmr ?? current.bmr ?? bmrCalc);
+    const resolvedProtein  = Math.round(profileData.protein ?? current.protein ?? protCalc);
+    const resolvedCarbs    = Math.round(profileData.carbs ?? current.carbs ?? carbsCalc);
+    const resolvedFat      = Math.round(profileData.fat ?? current.fat ?? fatCalc);
+
     const cleanProfile = {
-      name:     profileData.name || 'User',
-      age:      parseInt(profileData.age, 10) || 23,
-      weight:   parseFloat(profileData.weight) || 75,
-      height:   parseFloat(profileData.height) || 175,
-      gender:   profileData.gender === 'female' ? 'female' : 'male',
-      activity: profileData.activity || 'moderate',
-      goal:     ['cut', 'bulk', 'maintain'].includes(profileData.goal) ? profileData.goal : 'maintain',
-      calories: Math.round(profileData.calories) || 2000,
-      tdee:     Math.round(profileData.tdee) || 2000,
-      bmr:      Math.round(profileData.bmr) || 1600,
-      protein:  Math.round(profileData.protein) || 140,
-      carbs:    Math.round(profileData.carbs) || 200,
-      fat:      Math.round(profileData.fat) || 60,
+      name:     resolvedName,
+      age:      resolvedAge,
+      weight:   resolvedWeight,
+      height:   resolvedHeight,
+      gender:   resolvedGender,
+      activity: resolvedActivity,
+      goal:     resolvedGoal,
+      calories: resolvedCalories,
+      tdee:     resolvedTdee,
+      bmr:      resolvedBmr,
+      protein:  resolvedProtein,
+      carbs:    resolvedCarbs,
+      fat:      resolvedFat,
     };
 
     // Optimistic UI update & immediate local persistence
@@ -512,9 +572,24 @@ export function useSupabaseData(authUser, FOOD_DB) {
       return updated;
     });
 
-    // Also update profile weight if logged for today
+    // Also update profile weight if logged for today (target ONLY weight column, preserving all profile attributes)
     if (logDate === today) {
-      saveProfile({ weight: numWeight });
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, weight: numWeight, updated_at: new Date().toISOString() };
+        try {
+          localStorage.setItem(`healthify_user_profile_${authUser.id}`, JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      supabase
+        .from('profiles')
+        .update({ weight: numWeight, updated_at: new Date().toISOString() })
+        .eq('id', authUser.id)
+        .then(({ error: profErr }) => {
+          if (profErr) console.warn('Could not sync weight to profile table:', profErr.message);
+        });
     }
 
     try {

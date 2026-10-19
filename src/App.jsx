@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock, Smartphone, Download, ScanBarcode } from "lucide-react";
+import { Search, Sparkles, Plus, Home, BarChart2, User, ChevronRight, Activity, Target, Zap, Droplets, Utensils, Check, Coffee, Carrot, Fish, Apple, X, Loader2, Scale, TrendingUp, TrendingDown, Minus, Calendar, RotateCcw, Repeat, History, Clock, Smartphone, Download, ScanBarcode, Edit3 } from "lucide-react";
 
 import { useAuth } from './hooks/useAuth';
 import { useSupabaseData } from './hooks/useSupabaseData';
@@ -724,7 +724,32 @@ const Landing = ({ onStart, onDemo }) => {
 // ── Onboarding (3 steps) ─────────────────────────────────────
 const Onboard = ({ onFinish, initialData, onCancel }) => {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState(initialData || { name: '', age: 23, weight: 75, height: 175, gender: 'male', activity: 'moderate', goal: 'bulk' });
+  const [form, setForm] = useState(() => ({
+    name:     initialData?.name || '',
+    age:      initialData?.age || 23,
+    weight:   initialData?.weight || 75,
+    height:   initialData?.height || 175,
+    gender:   initialData?.gender || 'male',
+    activity: initialData?.activity || 'moderate',
+    goal:     initialData?.goal || 'bulk',
+  }));
+
+  // Synchronize form if initialData updates or loads asynchronously
+  useEffect(() => {
+    if (initialData) {
+      setForm(prev => ({
+        ...prev,
+        name:     (initialData.name && initialData.name !== 'User') ? initialData.name : prev.name,
+        age:      initialData.age ?? prev.age,
+        weight:   initialData.weight ?? prev.weight,
+        height:   initialData.height ?? prev.height,
+        gender:   initialData.gender ?? prev.gender,
+        activity: initialData.activity ?? prev.activity,
+        goal:     initialData.goal ?? prev.goal,
+      }));
+    }
+  }, [initialData]);
+
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const nutrition = calcNutrition(form);
   const gi = GOALS.find(g => g.key === form.goal) || GOALS[1];
@@ -2684,9 +2709,15 @@ const Profile = ({ user, logs, setPage, signOut, pwa }) => {
         <div className="display" style={{ fontSize: 24, fontWeight: 600, color: 'var(--ink-primary)', marginBottom: 4, letterSpacing: '-0.02em' }}>
           {user.name || 'Your Profile'}
         </div>
-        <div style={{ fontSize: 13, color: 'var(--ink-muted)', fontWeight: 500 }}>
+        <div style={{ fontSize: 13, color: 'var(--ink-muted)', fontWeight: 500, marginBottom: 12 }}>
           {user.gender === 'male' ? 'Male' : 'Female'} · {user.age} yrs · <span className="mono-num">{user.weight}</span> kg · <span className="mono-num">{user.height}</span> cm
         </div>
+        <button
+          className="btn-secondary"
+          onClick={() => setPage('onboard')}
+          style={{ padding: '6px 14px', fontSize: 12, gap: 6, display: 'inline-flex', alignItems: 'center' }}>
+          <Edit3 size={13} /> Edit Profile & Goals
+        </button>
       </motion.div>
 
       {/* ── Goal banner ── */}
@@ -3460,7 +3491,12 @@ export default function Healthify() {
   // ── Onboarding ──
   if (page === 'onboard') return (
     <div style={BASE}><GlobalStyle />
-      <Onboard onFinish={handleFinish} initialData={activeUser} onCancel={activeUser ? () => setPage('profile') : null} />
+      <Onboard
+        key={activeUser?.id || authUser?.id || 'new_user'}
+        onFinish={handleFinish}
+        initialData={activeUser || (authUser?.user_metadata?.name ? { name: authUser.user_metadata.name } : null)}
+        onCancel={activeUser ? () => setPage('profile') : null}
+      />
     </div>
   );
 
