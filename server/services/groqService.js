@@ -5,7 +5,7 @@
  * 1. parseFoodText()  — NLP extraction of structured food items from free text
  * 2. analyzeNutrition() — Generate AI nutrition analysis from aggregated totals
  * 
- * Uses qwen/qwen3-32b via the Groq API (OpenAI-compatible endpoint).
+ * Uses openai/gpt-oss-120b via the Groq API (OpenAI-compatible endpoint).
  * Includes retry logic, response sanitization, and structured validation.
  */
 

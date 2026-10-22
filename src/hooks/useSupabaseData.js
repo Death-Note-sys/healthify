@@ -505,19 +505,24 @@ export function useSupabaseData(authUser, FOOD_DB) {
   // ── Water logs ────────────────────────────────────────────
   const loadWater = async () => {
     const today = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('water_logs')
       .select('glasses')
       .eq('user_id', authUser.id)
       .eq('date', today)
       .single();
+    if (error && error.code !== 'PGRST116') {
+      // PGRST116 = no rows found (normal for first log of the day)
+      console.warn('loadWater error:', error.code, error.message);
+    }
     setWater(data?.glasses || 0);
   };
 
   const saveWater = async (glasses) => {
+    const prev = water;
     setWater(glasses);                       // optimistic UI update
     const today = new Date().toISOString().split('T')[0];
-    await supabase.from('water_logs').upsert(
+    const { error } = await supabase.from('water_logs').upsert(
       {
         user_id: authUser.id,
         glasses,
@@ -525,6 +530,10 @@ export function useSupabaseData(authUser, FOOD_DB) {
       },
       { onConflict: 'user_id,date' },
     );
+    if (error) {
+      console.error('saveWater sync error:', error.code, error.message);
+      setWater(prev);                        // rollback optimistic update
+    }
   };
 
   // ── Weight logs ───────────────────────────────────────────
