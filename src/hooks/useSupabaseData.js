@@ -70,6 +70,20 @@ export function useSupabaseData(authUser, FOOD_DB) {
     setLoading(false);
   };
 
+  // ── JWT clock-skew auto-heal ──────────────────────────────
+  // If Supabase returns PGRST303 ("JWT issued at future") due to clock drift,
+  // refresh the session token and retry the query once automatically.
+  const refreshAndRetry = async (queryFn) => {
+    const result = await queryFn();
+    const err = result?.error;
+    if (err && (err.code === 'PGRST303' || err.message?.includes('JWT'))) {
+      console.warn('[Auth] JWT clock skew detected, refreshing session...');
+      await supabase.auth.refreshSession();
+      return queryFn(); // retry once with the fresh token
+    }
+    return result;
+  };
+
   // ── Profile ───────────────────────────────────────────────
   const loadProfile = async () => {
     if (!authUser?.id) return;
@@ -522,13 +536,9 @@ export function useSupabaseData(authUser, FOOD_DB) {
     const prev = water;
     setWater(glasses);                       // optimistic UI update
     const today = new Date().toISOString().split('T')[0];
-    const { error } = await supabase.from('water_logs').upsert(
-      {
-        user_id: authUser.id,
-        glasses,
-        date:    today,
-      },
-      { onConflict: 'user_id,date' },
+    const payload = { user_id: authUser.id, glasses, date: today };
+    const { error } = await refreshAndRetry(() =>
+      supabase.from('water_logs').upsert(payload, { onConflict: 'user_id,date' })
     );
     if (error) {
       console.error('saveWater sync error:', error.code, error.message);

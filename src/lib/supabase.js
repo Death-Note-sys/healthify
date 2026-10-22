@@ -9,4 +9,15 @@ if (!supabaseUrl || !supabaseKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    autoRefreshToken:    true,
+    persistSession:      true,
+    detectSessionInUrl:  true,
+  },
+  global: {
+    // Tolerate up to 5 min of clock skew between device and Supabase servers
+    // Prevents PGRST303 "JWT issued at future" when clocks are slightly out of sync
+    fetch: (...args) => fetch(...args),
+  },
+});

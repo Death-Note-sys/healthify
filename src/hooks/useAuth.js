@@ -7,8 +7,15 @@ export function useAuth() {
 
   useEffect(() => {
     // 1. Get existing session (e.g. after page refresh)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        // Force-refresh the token so the new JWT's iat aligns with Supabase
+        // server time, preventing PGRST303 "JWT issued at future" clock skew errors
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        setUser(refreshed?.session?.user ?? session.user ?? null);
+      } else {
+        setUser(null);
+      }
       setLoading(false);
     });
 
