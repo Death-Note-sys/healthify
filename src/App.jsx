@@ -1444,7 +1444,7 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
               <motion.div layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} key={m} style={{ marginBottom: 20 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 6, borderBottom: '1px solid var(--glass-border)' }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-secondary)', textTransform: 'capitalize' }}>{m}</div>
-                  <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)', fontWeight: 500 }}>{Math.round(items.reduce((a, l) => a + l.food.cal * l.qty, 0))} kcal</div>
+                  <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)', fontWeight: 500 }}>{Math.round(items.reduce((a, l) => a + (l.food?.cal || l.food?.calories || 0) * (l.qty || 1), 0))} kcal</div>
                 </div>
                 {items.map(l => (
                   <motion.div layout key={l.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, scale: 0.95 }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
@@ -1474,8 +1474,8 @@ const Dashboard = ({ user, logs, addFoodLog, deleteFoodLog, water, saveWater, we
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
                       <div style={{ textAlign: 'right' }}>
-                        <div className="mono-num" style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-primary)' }}>{Math.round(l.food.cal * l.qty)} kcal</div>
-                        <div className="mono-num" style={{ fontSize: 12, color: 'var(--accent-blue)', fontWeight: 500 }}>{Math.round(l.food.protein * l.qty)}g Pro</div>
+                        <div className="mono-num" style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-primary)' }}>{Math.round((l.food?.cal || l.food?.calories || 0) * (l.qty || 1))} kcal</div>
+                        <div className="mono-num" style={{ fontSize: 12, color: 'var(--accent-blue)', fontWeight: 500 }}>{Math.round((l.food?.protein || 0) * (l.qty || 1))}g Pro</div>
                       </div>
                       <button onClick={() => delLog(l.id)} style={{ color: 'var(--ink-muted)', background: 'transparent', border: 'none', padding: 4, borderRadius: 6, cursor: 'pointer' }}>
                         <X size={16} />
@@ -1514,7 +1514,7 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
   };
 
   const todayL = logs.filter(l => isToday(l.date || l.logged_at));
-  const tCal   = todayL.reduce((a, l) => a + (l.food?.cal || 0) * (l.qty || 1), 0);
+  const tCal   = todayL.reduce((a, l) => a + (l.food?.cal || l.food?.calories || 0) * (l.qty || 1), 0);
   const tProt  = todayL.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0);
   const gCal   = user?.calories || 2500;
   const gProt  = user?.protein  || 150;
@@ -1855,10 +1855,10 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <AnimatePresence mode="popLayout">
                 {recentFoods.map((item) => {
-                  const totalItemCal = Math.round((item.food.cal || 0) * (item.qty || 1));
-                  const totalItemProt = Math.round((item.food.protein || 0) * (item.qty || 1));
-                  const totalItemCarb = Math.round((item.food.carbs || 0) * (item.qty || 1));
-                  const totalItemFat = Math.round((item.food.fat || 0) * (item.qty || 1));
+                  const totalItemCal = Math.round((item.food?.cal || item.food?.calories || 0) * (item.qty || 1));
+                  const totalItemProt = Math.round((item.food?.protein || 0) * (item.qty || 1));
+                  const totalItemCarb = Math.round((item.food?.carbs || 0) * (item.qty || 1));
+                  const totalItemFat = Math.round((item.food?.fat || 0) * (item.qty || 1));
                   return (
                     <motion.div
                       layout
@@ -2040,10 +2040,10 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
         ) : (
           <AnimatePresence mode="popLayout">
             {mealGroups.map(({ m, items }) => {
-              const mCal  = Math.round(items.reduce((a, l) => a + l.food.cal     * l.qty, 0));
-              const mProt = Math.round(items.reduce((a, l) => a + l.food.protein * l.qty, 0));
-              const mCarb = Math.round(items.reduce((a, l) => a + l.food.carbs   * l.qty, 0));
-              const mFat  = Math.round(items.reduce((a, l) => a + l.food.fat     * l.qty, 0));
+              const mCal  = Math.round(items.reduce((a, l) => a + (l.food?.cal || l.food?.calories || 0) * (l.qty || 1), 0));
+              const mProt = Math.round(items.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0));
+              const mCarb = Math.round(items.reduce((a, l) => a + (l.food?.carbs   || 0) * (l.qty || 1), 0));
+              const mFat  = Math.round(items.reduce((a, l) => a + (l.food?.fat     || 0) * (l.qty || 1), 0));
               return (
                 <motion.div layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} key={m} style={{ marginBottom: 24 }}>
                   {/* Meal section header */}
@@ -2084,15 +2084,15 @@ const FoodLog = ({ user, logs, addFoodLog, deleteFoodLog, addCustomFoodLog, demo
                             <div style={{ fontWeight: 500, fontSize: 14, color: 'var(--ink-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.food.name}>{l.food.name}</div>
                             <div className="mono-num" style={{ fontSize: 12, color: 'var(--ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {l.qty}× {l.food.s || 'custom'} &nbsp;·&nbsp;
-                              <span style={{ color: 'var(--accent-blue)' }}>{Math.round((l.food.protein || 0) * l.qty)}g P</span> ·{' '}
-                              <span style={{ color: 'var(--accent-green)' }}>{Math.round((l.food.carbs || 0) * l.qty)}g C</span> ·{' '}
-                              <span style={{ color: 'var(--accent-amber)' }}>{Math.round((l.food.fat || 0) * l.qty)}g F</span>
+                              <span style={{ color: 'var(--accent-blue)' }}>{Math.round((l.food?.protein || 0) * (l.qty || 1))}g P</span> ·{' '}
+                              <span style={{ color: 'var(--accent-green)' }}>{Math.round((l.food?.carbs || 0) * (l.qty || 1))}g C</span> ·{' '}
+                              <span style={{ color: 'var(--accent-amber)' }}>{Math.round((l.food?.fat || 0) * (l.qty || 1))}g F</span>
                             </div>
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
                           <div style={{ textAlign: 'right' }}>
-                            <div className="mono-num" style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-primary)' }}>{Math.round(l.food.cal * l.qty)}</div>
+                            <div className="mono-num" style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-primary)' }}>{Math.round((l.food?.cal || l.food?.calories || 0) * (l.qty || 1))}</div>
                             <div style={{ fontSize: 11, color: 'var(--ink-muted)', fontWeight: 500 }}>kcal</div>
                           </div>
                           <button onClick={() => delLog(l.id)} style={{
@@ -2396,15 +2396,48 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
 
   // Today macros for pie
   const todayL = logs.filter(l => isToday(l.date || l.logged_at));
+  const totalKcal = Math.round(todayL.reduce((a, l) => a + (l.food?.cal || l.food?.calories || 0) * (l.qty || 1), 0));
   const tProt  = todayL.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0);
   const tCarbs = todayL.reduce((a, l) => a + (l.food?.carbs || 0) * (l.qty || 1), 0);
   const tFat   = todayL.reduce((a, l) => a + (l.food?.fat || 0) * (l.qty || 1), 0);
-  const totalKcal = Math.round(tProt*4 + tCarbs*4 + tFat*9);
+
+  // Precision gram formatter: whole numbers as integers (e.g. 5g), fractions with 1 decimal (e.g. 1.8g)
+  const formatGram = g => {
+    if (!g || isNaN(g)) return '0';
+    const rounded = Math.round(g * 10) / 10;
+    return rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1);
+  };
+
+  // Exact uncompromised macronutrient energy based on Atwater constants: 4 kcal/g for protein & carbs, 9 kcal/g for fat
+  const rawPKcal = Math.round(tProt * 4);
+  const rawCKcal = Math.round(tCarbs * 4);
+  const rawFKcal = Math.round(tFat * 9);
+  const macroEnergySum = rawPKcal + rawCKcal + rawFKcal;
+
+  // True macro energy percentages summing to 100%
+  const pPct = macroEnergySum > 0 ? Math.round((rawPKcal / macroEnergySum) * 100) : 0;
+  const cPct = macroEnergySum > 0 ? Math.round((rawCKcal / macroEnergySum) * 100) : 0;
+  const fPct = macroEnergySum > 0 ? Math.max(0, 100 - pPct - cPct) : 0;
+
+  // Harmonize macro calories with totalKcal when difference is within rounding tolerance (<= 3 kcal)
+  const diff = totalKcal - macroEnergySum;
+  let pKcal = rawPKcal;
+  let cKcal = rawCKcal;
+  let fKcal = rawFKcal;
+  if (Math.abs(diff) > 0 && Math.abs(diff) <= 3 && totalKcal > 0) {
+    if (cKcal >= pKcal && cKcal >= fKcal && cKcal + diff >= 0) {
+      cKcal += diff;
+    } else if (pKcal >= fKcal && pKcal + diff >= 0) {
+      pKcal += diff;
+    } else if (fKcal + diff >= 0) {
+      fKcal += diff;
+    }
+  }
 
   const pieData = [
-    { name:'Protein', value: Math.round(tProt*4),  color: 'var(--accent-blue)'   },
-    { name:'Carbs',   value: Math.round(tCarbs*4), color: 'var(--accent-green)'   },
-    { name:'Fat',     value: Math.round(tFat*9),   color: 'var(--accent-amber)' },
+    { name:'Protein', value: pKcal, color: 'var(--accent-blue)'   },
+    { name:'Carbs',   value: cKcal, color: 'var(--accent-green)'   },
+    { name:'Fat',     value: fKcal, color: 'var(--accent-amber)' },
   ].filter(d => d.value > 0);
 
   // Micronutrient totals for today
@@ -2560,10 +2593,10 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
             </div>
             <div style={{ flex: 1 }}>
               {[
-                { label:'Protein', g: Math.round(tProt),  kcal: Math.round(tProt*4),  color: 'var(--accent-blue)'   },
-                { label:'Carbs',   g: Math.round(tCarbs), kcal: Math.round(tCarbs*4), color: 'var(--accent-green)'   },
-                { label:'Fat',     g: Math.round(tFat),   kcal: Math.round(tFat*9),   color: 'var(--accent-amber)' },
-              ].map(({ label, g, kcal, color }) => (
+                { label:'Protein', g: formatGram(tProt),  kcal: pKcal, pct: pPct, color: 'var(--accent-blue)'   },
+                { label:'Carbs',   g: formatGram(tCarbs), kcal: cKcal, pct: cPct, color: 'var(--accent-green)'   },
+                { label:'Fat',     g: formatGram(tFat),   kcal: fKcal, pct: fPct, color: 'var(--accent-amber)' },
+              ].map(({ label, g, kcal, pct, color }) => (
                 <div key={label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 12 }}>
                   <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
                     <div style={{ width: 8, height: 8, borderRadius:'50%', background: color }} />
@@ -2571,7 +2604,7 @@ const Analytics = ({ user, logs, weightLogs = [], setPage }) => {
                   </div>
                   <div className="mono-num" style={{ fontSize: 13 }}>
                     <strong style={{ color:'var(--ink-primary)', fontWeight: 600 }}>{g}g</strong>
-                    <span style={{ color: 'var(--ink-muted)', fontSize: 11, marginLeft: 4 }}>· {kcal} kcal</span>
+                    <span style={{ color: 'var(--ink-muted)', fontSize: 11, marginLeft: 4 }}>· {kcal} kcal ({pct}%)</span>
                   </div>
                 </div>
               ))}
@@ -2687,7 +2720,9 @@ const Profile = ({ user, logs, setPage, signOut, pwa, saveProfile, setOnboardSte
   });
 
   const gi  = GOALS.find(g => g.key === user.goal) || GOALS[1];
-  const bmi = (user.weight / ((user.height / 100) ** 2)).toFixed(1);
+  const userH = user?.height > 0 ? user.height : 175;
+  const userW = user?.weight > 0 ? user.weight : 70;
+  const bmi = (userW / ((userH / 100) ** 2)).toFixed(1);
   const bmiStatus = bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese';
   const bmiColor  = bmi < 18.5 ? 'var(--accent-blue)' : bmi < 25 ? 'var(--accent-green)' : bmi < 30 ? 'var(--accent-amber)' : 'var(--accent-red)';
 
@@ -3278,9 +3313,9 @@ const Chat = ({
   const bottomRef = useRef(null);
   const scroll    = () => bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  const todayL = logs.filter(l => isToday(l.date));
-  const tCal   = Math.round(todayL.reduce((a, l) => a + (l.food.calories || l.food.cal || 0) * l.qty, 0));
-  const tProt  = Math.round(todayL.reduce((a, l) => a + (l.food.protein || 0) * l.qty, 0));
+  const todayL = logs.filter(l => isToday(l.date || l.logged_at));
+  const tCal   = Math.round(todayL.reduce((a, l) => a + (l.food?.cal || l.food?.calories || 0) * (l.qty || 1), 0));
+  const tProt  = Math.round(todayL.reduce((a, l) => a + (l.food?.protein || 0) * (l.qty || 1), 0));
 
   // ── Body Weight & Trends Context for AI ──
   const sortedW = [...weightLogs].sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
